@@ -1,4 +1,5 @@
 *.crt
 dump.rdb
 .DS_Store
-node_modules/
+sdd/
+AGENTS.md
