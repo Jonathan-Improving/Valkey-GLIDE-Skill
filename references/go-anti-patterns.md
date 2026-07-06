@@ -1,18 +1,18 @@
 # Go GLIDE Anti-Patterns
 
-This document contains anti-patterns specific to Go GLIDE development. These patterns should be avoided in production code.
+Use when reviewing Go GLIDE code for correctness or debugging batch/pipeline type errors.
 
 ---
 
 ## Package Selection
 
-### ❌ INCORRECT: Don't use go-redis
+### INCORRECT: Don't use go-redis
 ```go
-// NEVER use these
+// Do not use these
 import "github.com/redis/go-redis/v9"
 ```
 
-### ✅ CORRECT: Use GLIDE
+### Correct: Use GLIDE
 ```go
 import (
 	"context"
@@ -28,25 +28,25 @@ import (
 
 ## Type Assertions
 
-### ❌ INCORRECT: Unsafe type assertion
+### INCORRECT: Unsafe type assertion
 ```go
-// ❌ Unsafe - can panic if wrong type
+// Unsafe - can panic if wrong type
 strVal := results[0].(string)
 
-// ❌ Wrong - panics if not string
+// Wrong - panics if not string
 str := results[0].(string)
 ```
 
-### ✅ CORRECT: Safe type assertion
+### Correct: Safe type assertion
 ```go
-// ✅ Safe type assertion (recommended)
+// Safe type assertion (recommended)
 if str, ok := results[0].(string); ok {
 	fmt.Println("String result:", str)
 } else {
 	// Handle unexpected type
 }
 
-// ✅ Correct - safe type assertion
+// Correct - safe type assertion
 if str, ok := results[0].(string); ok {
 	fmt.Println("Result:", str)
 } else {
@@ -61,15 +61,15 @@ if str, ok := results[0].(string); ok {
 
 ## Error Handling
 
-### ❌ INCORRECT: Hiding error handling
+### INCORRECT: Hiding error handling
 ```go
-// ❌ Don't try to hide error handling
+// Don't try to hide error handling
 // No "smart" wrappers or generic error handlers
 ```
 
-### ✅ CORRECT: Explicit error handling
+### Correct: Explicit error handling
 ```go
-// ✅ Explicit error handling (Go way)
+// Explicit error handling (Go way)
 value, err := client.Get(ctx, "key")
 if err != nil {
 	return fmt.Errorf("failed to get key: %w", err)
@@ -80,17 +80,17 @@ if err != nil {
 
 ---
 
-### ❌ INCORRECT: Losing error context
+### INCORRECT: Losing error context
 ```go
-// ❌ Don't lose error context
+// Don't lose error context
 if err != nil {
 	return err  // What failed? Which key?
 }
 ```
 
-### ✅ CORRECT: Wrap errors with context
+### Correct: Wrap errors with context
 ```go
-// ✅ Wrap errors with context
+// Wrap errors with context
 value, err := client.Get(ctx, userKey)
 if err != nil {
 	return fmt.Errorf("failed to fetch user %s: %w", userID, err)
@@ -103,18 +103,18 @@ if err != nil {
 
 ## Configuration
 
-### ❌ INCORRECT: Struct tag magic
+### INCORRECT: Struct tag magic
 ```go
-// ❌ Not like this (anti-pattern from other ORMs)
+// Not like this (anti-pattern from other ORMs)
 // type Config struct {
 //     Host string `valkey:"host"`
 //     Port int    `valkey:"port"`
 // }
 ```
 
-### ✅ CORRECT: Explicit configuration
+### Correct: Explicit configuration
 ```go
-// ✅ Explicit configuration
+// Explicit configuration
 cfg := config.NewClientConfiguration().
 	WithAddress(&config.NodeAddress{Host: "localhost", Port: 6379}).
 	WithRequestTimeout(10000)
@@ -126,18 +126,18 @@ cfg := config.NewClientConfiguration().
 
 ## Model Design
 
-### ❌ INCORRECT: Combining responsibilities
+### INCORRECT: Combining responsibilities
 ```go
-// ❌ Don't combine responsibilities
+// Don't combine responsibilities
 // type User struct {
 //     ID   int    `json:"id" cache:"id"`
 //     Name string `json:"name" cache:"name"`
 // }
 ```
 
-### ✅ CORRECT: Separate models
+### Correct: Separate models
 ```go
-// ✅ Separate models
+// Separate models
 type UserAPIResponse struct {
 	ID    int    `json:"id"`
 	Name  string `json:"name"`
@@ -164,9 +164,9 @@ func toAPIResponse(cache UserCacheModel) UserAPIResponse {
 
 ## Context Usage
 
-### ✅ CORRECT: Production timeout context
+### Correct: Production timeout context
 ```go
-// ✅ Production: timeout context
+// Production: timeout context
 ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 defer cancel()
 
@@ -179,9 +179,9 @@ if err != nil {
 }
 ```
 
-### ✅ CORRECT: Simple demos background context
+### Correct: Simple demos background context
 ```go
-// ✅ Simple demos: background context
+// Simple demos: background context
 ctx := context.Background()
 value, err := client.Get(ctx, "key")
 ```
@@ -192,16 +192,16 @@ value, err := client.Get(ctx, "key")
 
 ## Performance Optimization
 
-### ❌ INCORRECT: Fetching entire JSON object
+### INCORRECT: Fetching entire JSON object
 ```go
-// ❌ Inefficient — must fetch/parse entire object
+// Inefficient — must fetch/parse entire object
 data, _ := json.Marshal(user)
 client.Set(ctx, "user:123", string(data))
 ```
 
-### ✅ CORRECT: Use Hash for structured data
+### Correct: Use Hash for structured data
 ```go
-// ✅ Efficient — fetch only needed fields
+// Efficient — fetch only needed fields
 client.HSet(ctx, "user:123", map[string]string{"name": "John", "email": "john@example.com"})
 name, _ := client.HGet(ctx, "user:123", "name")
 ```
@@ -216,13 +216,13 @@ name, _ := client.HGet(ctx, "user:123", "name")
 
 The `=>` token in FT.SEARCH syntax separates a filter from a KNN vector clause. If user-controlled input is interpolated into query strings without sanitization, an attacker can inject a KNN clause that bypasses all filters and returns all documents.
 
-### ❌ INCORRECT: Interpolating user input without sanitization
+### INCORRECT: Interpolating user input without sanitization
 ```go
-// ❌ VULNERABLE — userFilter could contain "=>[KNN ...]"
+// VULNERABLE — userFilter could contain "=>[KNN ...]"
 query := fmt.Sprintf("(%s) %s", userFilter, searchText)
 ```
 
-### ✅ CORRECT: Reject `=>` before query construction
+### Correct: Reject `=>` before query construction
 ```go
 if strings.Contains(userFilter, "=>") {
     return nil, fmt.Errorf("filter must not contain '=>'")

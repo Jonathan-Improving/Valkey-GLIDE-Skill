@@ -1,44 +1,44 @@
-# JavaScript/TypeScript GLIDE Anti-Patterns
+# Node.js GLIDE Anti-Patterns
 
-This document contains anti-patterns specific to JavaScript/TypeScript GLIDE development. These patterns should be avoided in production code.
+Use when reviewing Node.js GLIDE code for correctness or debugging promise/decoder issues.
 
 ---
 
 ## Async Iteration
 
-### ❌ INCORRECT: forEach with async callbacks
+### INCORRECT: forEach with async callbacks
 ```javascript
-// ❌ Wrong - forEach doesn't await (fire-and-forget)
+// Wrong - forEach doesn't await (fire-and-forget)
 keys.forEach(async (key) => {
   await client.del(key);  // These run immediately, not sequentially
 });
 console.log("Done!"); // Lies - operations still running
 
-// ❌ Wrong - fire-and-forget (operations not awaited)
+// Wrong - fire-and-forget (operations not awaited)
 keys.forEach(async (key) => {
   await client.del(key);
 });
 ```
 
-### ✅ CORRECT: Sequential with for...of
+### Correct: Sequential with for...of
 ```javascript
-// ✅ Correct - Sequential with for...of
+// Correct - Sequential with for...of
 for (const key of keys) {
   await client.del(key);
 }
 console.log("Actually done");
 ```
 
-### ✅ CORRECT: Parallel with Promise.all
+### Correct: Parallel with Promise.all
 ```javascript
-// ✅ Correct - Parallel with Promise.all
+// Correct - Parallel with Promise.all
 await Promise.all(keys.map(key => client.del(key)));
 console.log("All operations complete");
 ```
 
-### ✅ CORRECT: Use batch
+### Correct: Use batch
 ```javascript
-// ✅ Best - Use batch for multiple operations
+// Best - Use batch for multiple operations
 const batch = new Batch(false);
 keys.forEach(key => batch.del([key]));
 await client.exec(batch, true);
@@ -50,16 +50,16 @@ await client.exec(batch, true);
 
 ## Batch Operations
 
-### ❌ INCORRECT: Wrong Batch class for client type
+### INCORRECT: Wrong Batch class for client type
 ```javascript
-// ❌ Wrong
+// Wrong
 const batch = new Batch(true);
 await clusterClient.exec(batch, true);
 ```
 
-### ✅ CORRECT: Use ClusterBatch for cluster
+### Correct: Use ClusterBatch for cluster
 ```javascript
-// ✅ Correct
+// Correct
 const batch = new ClusterBatch(true);
 await clusterClient.exec(batch, true);
 ```
@@ -70,15 +70,15 @@ await clusterClient.exec(batch, true);
 
 ## Binary Data Handling
 
-### ❌ INCORRECT: Missing Decoder.Bytes
+### INCORRECT: Missing Decoder.Bytes
 ```javascript
-// ❌ Wrong - UTF-8 decoding fails on binary vectors
+// Wrong - UTF-8 decoding fails on binary vectors
 const results = await GlideFt.search(client, "idx", query);
 ```
 
-### ✅ CORRECT: Use Decoder.Bytes
+### Correct: Use Decoder.Bytes
 ```javascript
-// ✅ Correct
+// Correct
 const results = await GlideFt.search(client, "idx", query, {
   decoder: Decoder.Bytes,
 });
@@ -90,17 +90,17 @@ const results = await GlideFt.search(client, "idx", query, {
 
 ## Cluster Operations
 
-### ❌ INCORRECT: CROSSSLOT in atomic batches
+### INCORRECT: CROSSSLOT in atomic batches
 ```javascript
-// ❌ Wrong - different slots
+// Wrong - different slots
 const batch = new ClusterBatch(true);
 batch.get("key1");
 batch.get("key2"); // CROSSSLOT error
 ```
 
-### ✅ CORRECT: Use hash tags
+### Correct: Use hash tags
 ```javascript
-// ✅ Correct - use hash tags
+// Correct - use hash tags
 const batch = new ClusterBatch(true);
 batch.get("{user}:1");
 batch.get("{user}:2");
@@ -112,15 +112,15 @@ batch.get("{user}:2");
 
 ## Method Names
 
-### ❌ INCORRECT: Wrong method name
+### INCORRECT: Wrong method name
 ```javascript
-// ❌ Wrong
+// Wrong
 await GlideFt.dropIndex(client, "idx"); // Not a function
 ```
 
-### ✅ CORRECT: Lowercase 'index'
+### Correct: Lowercase 'index'
 ```javascript
-// ✅ Correct
+// Correct
 await GlideFt.dropindex(client, "idx"); // lowercase 'index'
 ```
 
@@ -130,17 +130,17 @@ await GlideFt.dropindex(client, "idx"); // lowercase 'index'
 
 ## Resource Management
 
-### ❌ INCORRECT: Missing finally block
+### INCORRECT: Missing finally block
 ```javascript
-// ❌ Wrong - client not closed if error occurs
+// Wrong - client not closed if error occurs
 const client = await GlideClient.createClient({...});
 await client.set("key", "value");
 client.close();
 ```
 
-### ✅ CORRECT: Always use finally
+### Correct: Always use finally
 ```javascript
-// ✅ Correct - always closes
+// Correct - always closes
 const client = await GlideClient.createClient({...});
 try {
   await client.set("key", "value");
@@ -155,16 +155,16 @@ try {
 
 ## Performance Optimization
 
-### ❌ INCORRECT: Fetching entire JSON object
+### INCORRECT: Fetching entire JSON object
 ```typescript
-// ❌ Inefficient — must fetch/parse entire object
+// Inefficient — must fetch/parse entire object
 await client.set("user:123", JSON.stringify(user));
 const parsed = JSON.parse(await client.get("user:123"));
 ```
 
-### ✅ CORRECT: Use Hash for structured data
+### Correct: Use Hash for structured data
 ```typescript
-// ✅ Efficient — fetch only needed fields
+// Efficient — fetch only needed fields
 await client.hset("user:123", { name: "John", email: "john@example.com", age: "30" });
 const name = await client.hget("user:123", "name");
 ```
@@ -179,13 +179,13 @@ const name = await client.hget("user:123", "name");
 
 The `=>` token in FT.SEARCH syntax separates a filter from a KNN vector clause. If user-controlled input is interpolated into query strings without sanitization, an attacker can inject a KNN clause that bypasses all filters and returns all documents.
 
-### ❌ INCORRECT: Interpolating user input without sanitization
+### INCORRECT: Interpolating user input without sanitization
 ```javascript
-// ❌ VULNERABLE — userFilter could contain "=>[KNN ...]"
+// VULNERABLE — userFilter could contain "=>[KNN ...]"
 const query = `(${userFilter}) ${searchText}`;
 ```
 
-### ✅ CORRECT: Reject `=>` before query construction
+### Correct: Reject `=>` before query construction
 ```javascript
 if (userFilter && userFilter.includes("=>")) {
   throw new Error("Filter must not contain '=>'");

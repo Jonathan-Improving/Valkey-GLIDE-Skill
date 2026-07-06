@@ -1,4 +1,6 @@
-# Node.js GLIDE Skill
+# Node.js GLIDE Guide
+
+Use when writing or reviewing TypeScript/JavaScript code that uses @valkey/valkey-glide.
 
 ## External Resources
 - `../assets/nodejs-config.ts` - Client connection config templates, TLS/SSL, authentication (password, username, AWS IAM), cluster, standalone, etc.
@@ -8,10 +10,10 @@
 ## Package Selection
 
 ```javascript
-// ✅ Correct
+// Correct
 const { GlideClient, GlideClusterClient } = require("@valkey/valkey-glide");
 
-// ❌ Wrong
+// Wrong
 const valkey = require("valkey"); // Different library
 ```
 
@@ -152,7 +154,7 @@ await client.hset("product:1", {
 
 ### Search
 
-**⚠️ SECURITY:** The `=>` token in FT.SEARCH syntax separates a filter from a KNN clause. If user-controlled input (e.g., a filter parameter) contains `=>`, an attacker can inject a KNN query that bypasses all filters and returns all documents. Reject `=>` in any user-supplied filter or field name before interpolating into query strings:
+**SECURITY:** The `=>` token in FT.SEARCH syntax separates a filter from a KNN clause. If user-controlled input (e.g., a filter parameter) contains `=>`, an attacker can inject a KNN query that bypasses all filters and returns all documents. Reject `=>` in any user-supplied filter or field name before interpolating into query strings:
 ```javascript
 if (userFilter && userFilter.includes("=>")) {
   throw new Error("Filter must not contain '=>'");

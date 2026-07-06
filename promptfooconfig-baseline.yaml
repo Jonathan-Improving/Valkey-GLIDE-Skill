@@ -1,22 +1,19 @@
-description: GLIDE Skill EDD - Token efficiency baseline
+description: GLIDE Skill EDD - WITHOUT skill baseline
 prompts:
-- file://prompt.txt
+- file://prompt-baseline.txt
 providers:
 - id: 'exec: python3 ./bridge.py'
   config:
     model: sonnet
     backend: claude
 defaultTest:
-  vars:
-    skill_context: file://SKILL.md
-    reference_context: ''
+  vars: {}
   options:
     provider: 'exec: python3 ./bridge.py'
 tests:
 - vars:
     prompt: Write a Python function using valkey-glide (sync) that creates an HNSW vector search index with 384 dimensions, cosine distance, and custom HNSW params (M=32, EF_CONSTRUCTION=400). Show the
       imports.
-    reference_context: file://references/python-ft-api.md
   assert:
   - type: javascript
     value: output.includes('VectorFieldAttributesHnsw')
@@ -31,7 +28,6 @@ tests:
     metric: code-density
 - vars:
     prompt: I'm using valkey-glide for Python. Can I import FtCreateOptions, VectorField, and TagField directly from glide_sync, or do I need the deep import path from glide_shared.commands.server_modules.ft_options.ft_create_options?
-    reference_context: file://references/python-ft-api.md
   assert:
   - type: javascript
     value: /from glide_sync import/.test(output)
@@ -39,7 +35,6 @@ tests:
     value: top-level imports are wrong
 - vars:
     prompt: Is ft.search(client, 'my_idx', '*') valid in valkey-glide Python, or do I need to use keyword arguments like ft.search(client=client, index_name='my_idx', query='*')?
-    reference_context: file://references/python-ft-api.md
   assert:
   - type: javascript
     value: /(both|positional.*valid|valid.*positional)/i.test(output)
@@ -47,14 +42,12 @@ tests:
     value: '!/(positional.*(wrong|incorrect|invalid|anti.pattern))/i.test(output)'
 - vars:
     prompt: Can I use ft.FtCreateOptions(...) in valkey-glide Python to create index options?
-    reference_context: file://references/python-ft-api.md
   assert:
   - type: llm-rubric
     value: The response correctly states that ft.FtCreateOptions does not exist — FtCreateOptions is a standalone class that must be imported directly (e.g., from glide or glide_sync), not accessed as an
       attribute of the ft module.
 - vars:
     prompt: Write a complete Python example using valkey-glide sync that creates a vector index with HNSW, stores a document, and searches for nearest neighbors. Use top-level imports.
-    reference_context: file://references/python-ft-api.md
   assert:
   - type: javascript
     value: /from glide_sync import/.test(output)
@@ -70,7 +63,6 @@ tests:
 - vars:
     prompt: Write a Python function using GLIDE that creates a vector search index for product embeddings and then searches for similar products. The index should have a 768-dim embedding field and a text
       field for product name.
-    reference_context: file://references/python-ft-api.md
   assert:
   - type: javascript
     value: /\bft\.create\(/.test(output)
@@ -86,7 +78,6 @@ tests:
     metric: code-density
 - vars:
     prompt: I have a valkey-glide Python app (async). I need to run an FT.AGGREGATE query that groups products by category and counts them. Show me how.
-    reference_context: file://references/python-ft-api.md
   assert:
   - type: llm-rubric
     value: The response uses ft.aggregate or custom_command with FT.AGGREGATE as a module-level function (not a client method), and imports ft from glide. It does not show client.ft_aggregate() or client.ft()
@@ -96,7 +87,6 @@ tests:
     metric: code-density
 - vars:
     prompt: Using valkey-glide Python, write a function that drops an index if it exists, creates a new one with TAG and NUMERIC fields, then does a search with filters. Use the sync client.
-    reference_context: file://references/python.md
   assert:
   - type: javascript
     value: /\bft\.dropindex\(/.test(output)
@@ -113,7 +103,6 @@ tests:
 - vars:
     prompt: "Review this Python code for correctness:\n```python\nfrom glide import GlideClusterClient\n\nasync def search(client: GlideClusterClient, query: str):\n    return await client.ft_search('my_idx',\
       \ query)\n```\n"
-    reference_context: file://references/python-ft-api.md
   assert:
   - type: javascript
     value: /(incorrect|wrong|invalid|doesn't exist|does not exist|not.*(method|attribute|valid))/i.test(output)
@@ -124,7 +113,6 @@ tests:
 - vars:
     prompt: "Review this Python code for correctness:\n```python\nfrom glide_sync import GlideClient\n\ndef create_index(client: GlideClient):\n    client.ft().create('products', {\n        'name': {'type':\
       \ 'TEXT'},\n        'price': {'type': 'NUMERIC'},\n    })\n```\n"
-    reference_context: file://references/python.md
   assert:
   - type: javascript
     value: /(incorrect|wrong|invalid|doesn't exist|does not exist|not.*(method|attribute|valid|correct)|redis.py|redis-py)/i.test(output)
@@ -135,21 +123,18 @@ tests:
 - vars:
     prompt: "Is this valkey-glide Python code correct?\n```python\nfrom glide import GlideClusterClient, ft\n\nasync def drop_and_recreate(client: GlideClusterClient):\n    await client.ft_dropindex('old_idx')\n\
       \    await ft.create(client, 'new_idx', schema=[...])\n```\n"
-    reference_context: file://references/python-ft-api.md
   assert:
   - type: llm-rubric
     value: The response identifies client.ft_dropindex as wrong (should be ft.dropindex(client, ...)) and acknowledges that ft.create(client, ...) is the correct pattern.
 - vars:
     prompt: "Review this Go code using valkey-glide. Is there a bug here?\n```go\nfunc flushUserCache(ctx context.Context, client *glide.Client, userIDs []string) error {\n    batch := pipeline.NewStandaloneBatch(false)\n\
       \    for _, id := range userIDs {\n        batch.Del(\"user:\" + id)\n    }\n    _, err := client.Exec(ctx, *batch, true)\n    return err\n}\n```\n"
-    reference_context: file://references/go.md
   assert:
   - type: llm-rubric
     value: The response correctly identifies that batch.Del takes []string (a slice of strings), not a single string argument. The code as written will not compile because it passes a single string to Del
       instead of a []string slice.
 - vars:
     prompt: What happens if I accidentally use pipeline.NewStandaloneBatch with a ClusterClient in valkey-glide Go? Will it panic at runtime?
-    reference_context: file://references/go.md
   assert:
   - type: javascript
     value: /(compile.*(time|error)|won't compile|will not compile|type.*(mismatch|error|system)|does not compile|compilation.*(error|fail))/i.test(output)
@@ -159,7 +144,6 @@ tests:
     metric: no-runtime-panic-claim
 - vars:
     prompt: Write a Go function using valkey-glide that executes a batch of SET commands and logs which specific commands failed without stopping on the first error.
-    reference_context: file://references/go.md
   assert:
   - type: javascript
     value: /Exec(WithOptions)?\(ctx,.*false/.test(output)
@@ -172,7 +156,6 @@ tests:
     metric: code-density
 - vars:
     prompt: Write a Python async function that connects to Valkey using GLIDE and performs a SET operation. Show proper resource cleanup.
-    reference_context: file://references/python.md
   assert:
   - type: llm-rubric
     value: The response demonstrates automatic resource cleanup using async with (context manager) or try/finally with explicit close(). It must not leave the client unclosed.
@@ -182,13 +165,11 @@ tests:
 - vars:
     prompt: "Review this Python FastAPI code:\n```python\n@app.get(\"/users/{user_id}\")\nasync def get_user(user_id: str):\n    config = GlideClientConfiguration([NodeAddress(\"localhost\", 6379)])\n \
       \   client = await GlideClient.create(config)\n    result = await client.get(f\"user:{user_id}\")\n    await client.close()\n    return {\"data\": result}\n```\n"
-    reference_context: file://references/python.md
   assert:
   - type: llm-rubric
     value: The response identifies creating a new client per request as an anti-pattern and recommends creating a single client at startup, reused across all requests.
 - vars:
     prompt: In valkey-glide Python, if I get a RequestException should I close the client and create a new one?
-    reference_context: file://references/python.md
   assert:
   - type: llm-rubric
     value: The response says no — GLIDE auto-reconnects on transient errors like RequestException and TimeoutError. Only recreate on ClosingError, which means the client was explicitly closed.
@@ -199,14 +180,12 @@ tests:
     value: The response warns that atomic batches require all keys to map to the same hash slot. 'user:1' and 'product:5' are different slots, causing CROSSSLOT. Suggests hash tags or non-atomic batch.
 - vars:
     prompt: What's the difference between raise_on_error=True and raise_on_error=False when calling client.exec() in valkey-glide Python?
-    reference_context: file://references/python.md
   assert:
   - type: llm-rubric
     value: 'The response explains: True raises an exception on the first error encountered; False returns errors embedded in the results array at their corresponding positions, allowing inspection of which
       commands failed.'
 - vars:
     prompt: How do I set request timeouts in valkey-glide Python? What happens if I don't set one?
-    reference_context: file://references/python.md
   assert:
   - type: javascript
     value: /250/i.test(output)
@@ -216,7 +195,6 @@ tests:
     metric: mentions-timeout-error-type
 - vars:
     prompt: "Review this valkey-glide Python error handling:\n```python\ntry:\n    await client.set(\"key\", \"value\")\nexcept Exception as e:\n    logger.error(f\"Failed: {e}\")\n```\n"
-    reference_context: file://references/python.md
   assert:
   - type: llm-rubric
     value: The response identifies catching bare Exception as an anti-pattern and recommends catching specific GLIDE exceptions (TimeoutError, RequestError, ConnectionError, or ClosingError) instead.
@@ -232,14 +210,12 @@ tests:
 - vars:
     prompt: "Review this valkey-glide Python code for performance:\n```python\nasync def get_user_profiles(client, user_ids):\n    profiles = []\n    for uid in user_ids:\n        profile = await client.hgetall(f\"\
       user:{uid}\")\n        profiles.append(profile)\n    return profiles\n```\n"
-    reference_context: file://references/python.md
   assert:
   - type: llm-rubric
     value: The response identifies sequential awaits in a loop as a performance anti-pattern causing one round-trip per iteration, and recommends batching (pipeline), asyncio.gather for concurrency, or
       MGET-style bulk operations.
 - vars:
     prompt: I'm building a Python app with Valkey. Should I use the 'redis' package or 'valkey' package from PyPI?
-    reference_context: file://references/python.md
   assert:
   - type: llm-rubric
     value: The response recommends valkey-glide (not redis, not the valkey PyPI package) as the official client, and steers away from Redis forks.

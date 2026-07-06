@@ -1,4 +1,6 @@
-# General Java Guidelines
+# Java GLIDE Guide
+
+Use when writing or reviewing Java code that uses io.valkey:valkey-glide.
 
 ## External Resources
 - `../assets/java-config.java` - Client connection config templates, TLS/SSL, authentication (password, username, AWS IAM), cluster, standalone, etc.
@@ -16,7 +18,7 @@
 
 ## Package Selection
 
-### ✅ CORRECT: Use GLIDE
+### Correct: Use GLIDE
 
 **Maven:**
 ```xml
@@ -55,9 +57,9 @@ dependencies {
 - Use `os-maven-plugin` or `osdetector` for platform detection
 - Supports: linux-x86_64, linux-aarch_64, osx-x86_64, osx-aarch_64, windows-x86_64
 
-### ❌ INCORRECT: Don't use Jedis or Lettuce
+### INCORRECT: Don't use Jedis or Lettuce
 ```java
-// NEVER use these
+// Do not use these
 import redis.clients.jedis.*;
 import io.lettuce.core.*;
 ```
@@ -265,8 +267,8 @@ Batch batch = new Batch(false);
 batch.hgetall("user:1");
 batch.get("name");
 Object[] results = client.exec(batch, true).get();
-Map<String, String> fields = (Map<String, String>) results[0]; // ✅ CORRECT
-String name = (String) results[1]; // ✅ CORRECT
+Map<String, String> fields = (Map<String, String>) results[0]; // Correct
+String name = (String) results[1]; // Correct
 ```
 
 ```java
@@ -275,8 +277,8 @@ Batch batch = new Batch(false).withBinaryOutput();
 batch.hgetall(gs("user:1"));
 batch.get(gs("name"));
 Object[] results = client.exec(batch, true).get();
-Map<GlideString, GlideString> fields = (Map<GlideString, GlideString>) results[0]; // ✅ CORRECT
-GlideString name = (GlideString) results[1]; // ✅ CORRECT
+Map<GlideString, GlideString> fields = (Map<GlideString, GlideString>) results[0]; // Correct
+GlideString name = (GlideString) results[1]; // Correct
 ```
 
 **The output type is controlled by `binaryOutput`, not by the key type passed to batch commands.** A batch without `.withBinaryOutput()` always returns String-based maps even if you pass GlideString keys.
@@ -417,7 +419,7 @@ FT.create(client, "my_idx", schema).get();
 
 ### Store Documents with Vectors
 ```java
-// CRITICAL: Use GlideString for binary vector data
+// Use GlideString for binary vector data
 Map<GlideString, GlideString> doc = Map.of(
     GlideString.of("embedding"), GlideString.of(vectorBytes),
     GlideString.of("text"), GlideString.of("content")
@@ -427,7 +429,7 @@ client.hset(GlideString.of("doc:1"), doc).get();
 
 ### Vector Search
 
-**⚠️ SECURITY:** The `=>` token in FT.SEARCH syntax separates a filter from a KNN clause. If user-controlled input (e.g., a filter parameter) contains `=>`, an attacker can inject a KNN query that bypasses all filters and returns all documents. Reject `=>` in any user-supplied filter or field name before interpolating into query strings:
+**SECURITY:** The `=>` token in FT.SEARCH syntax separates a filter from a KNN clause. If user-controlled input (e.g., a filter parameter) contains `=>`, an attacker can inject a KNN query that bypasses all filters and returns all documents. Reject `=>` in any user-supplied filter or field name before interpolating into query strings:
 ```java
 if (userFilter != null && userFilter.contains("=>")) {
     throw new IllegalArgumentException("Filter must not contain '=>'");
@@ -475,7 +477,7 @@ private static byte[] floatArrayToBytes(float[] array) {
 **Key Points:**
 - FT methods are static on `FT` class, not client methods
 - Use `GlideString.of()` factory method for binary data
-- **CRITICAL:** Binary vectors MUST use `GlideString`, NOT `String` - converting bytes to String corrupts data
+- Binary vectors use `GlideString`, NOT `String` - converting bytes to String corrupts data
 - Search returns `Object[]`: `[count, documents_map]`
 - Documents map only present if count > 0 - check `results.length > 1`
 - Use `ByteOrder.LITTLE_ENDIAN` for vector encoding
@@ -656,10 +658,10 @@ String user = userFuture.get();
 ## Thread Safety
 
 ```java
-// ✅ Client shared across threads
+// Client shared across threads
 private static final GlideClient client = createClient();
 
-// ✅ Batch created per thread (because Batch objects are NOT thread-safe)
+// Batch created per thread (because Batch objects are NOT thread-safe)
 Batch batch = new Batch(false);
 batch.get("key1");
 client.exec(batch, true).get();

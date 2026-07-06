@@ -1,6 +1,8 @@
-# Python GLIDE FT (Search) Module API Reference
+# Python FT (Search) Module API Reference
 
-## ⚠️ CRITICAL - READ BEFORE USING FT MODULE
+Use when writing or reviewing Python code that calls ft.create, ft.search, ft.aggregate, ft.dropindex, or ft.info.
+
+## Key Rules
 
 1. **NO CLIENT METHODS EXIST**: `client.ft_search()`, `client.ft_create()`, `client.ft()` DO NOT EXIST
 2. **ALL FUNCTIONS ARE MODULE-LEVEL**: Import `ft` and call `ft.function(client, ...)`
@@ -179,13 +181,13 @@ result = ft.create(
 
 **Common Mistakes:**
 ```python
-# ❌ WRONG - Method does not exist
+# Wrong - Method does not exist
 await client.ft_create("idx", schema)
 
-# ❌ WRONG - No ft attribute on client
+# Wrong - No ft attribute on client
 client.ft.create("idx", schema)
 
-# ✅ CORRECT - Module-level function
+# Correct - Module-level function
 ft.create(client, "idx", schema)
 ```
 
@@ -256,18 +258,18 @@ for key, fields in results[1].items():
     # See the section on 'Binary Data Handling' for complete decoding
 ```
 
-**⚠️ FT.SEARCH: Wildcard `*` cannot follow a filter expression**
+**FT.SEARCH: Wildcard `*` cannot follow a filter expression**
 
 When combining a filter with a text query, `*` after a filter is rejected as invalid syntax.
 
 ```python
-# ❌ WRONG — raises RequestError: Invalid wildcard '*' markers
+# Wrong — raises RequestError: Invalid wildcard '*' markers
 query = "(@category:{Electronics}) *"
 
-# ✅ CORRECT — filter alone acts as match-all within the filter
+# Correct — filter alone acts as match-all within the filter
 query = "@category:{Electronics}"
 
-# ✅ CORRECT — combine filter with actual text query
+# Correct — combine filter with actual text query
 query = "(@category:{Electronics}) headphones"
 ```
 
@@ -281,7 +283,7 @@ def build_text_query(query_text: str, filter_expr: str | None) -> str:
     return query_text
 ```
 
-**⚠️ SECURITY: Sanitize user input before query construction**
+**SECURITY: Sanitize user input before query construction**
 
 The `=>` token in FT.SEARCH syntax separates a filter expression from a KNN vector clause. If user-controlled input (e.g., a filter parameter from an API or MCP tool) contains `=>`, an attacker can inject a KNN vector search that bypasses all intended filters and returns all documents. This is a confirmed query injection vulnerability.
 
@@ -306,13 +308,13 @@ query = build_text_query(query_text, filter_expr)
 
 **Common Mistakes:**
 ```python
-# ❌ WRONG - Method does not exist
+# Wrong - Method does not exist
 results = await client.ft_search("idx", "*")
 
-# ❌ WRONG - No ft attribute on client  
+# Wrong - No ft attribute on client  
 results = client.ft.search("idx", "*")
 
-# ✅ CORRECT - Module-level function
+# Correct - Module-level function
 results = ft.search(client, "idx", "*")
 ```
 
@@ -321,12 +323,12 @@ results = ft.search(client, "idx", "*")
 `FtSearchOptions` does not accept `offset` or `limit` as direct keyword arguments. Pagination requires wrapping in `FtSearchLimit`.
 
 ```python
-# ❌ WRONG — TypeError: unexpected keyword argument
+# Wrong — TypeError: unexpected keyword argument
 FtSearchOptions(first_result=0, limit=10)
 ```
 
 ```python
-# ✅ CORRECT — use FtSearchLimit
+# Correct — use FtSearchLimit
 from glide_shared.commands.server_modules.ft_options.ft_search_options import (
     FtSearchLimit,
     FtSearchOptions,
@@ -404,15 +406,15 @@ ft.aggregate(
 - `query`: Search query string — **NOT the same as FT.SEARCH**. See wildcard warning below.
 - `options`: FtAggregateOptions with LOAD, GROUPBY, REDUCE, SORTBY, etc.
 
-**⚠️ CRITICAL: FT.AGGREGATE rejects wildcard `*` query**
+**FT.AGGREGATE rejects wildcard `*` query**
 
 Unlike FT.SEARCH, FT.AGGREGATE does not accept `*` as a match-all query. It raises `RequestError: Invalid query string syntax`.
 
 ```python
-# ❌ WRONG — raises RequestError
+# Wrong — raises RequestError
 ft.aggregate(client, "idx", "*", options)
 
-# ✅ CORRECT — use a field filter as match-all
+# Correct — use a field filter as match-all
 ft.aggregate(client, "idx", "@price:[0 inf]", options)  # numeric range
 ft.aggregate(client, "idx", "@category:{*}", options)    # tag wildcard (if applicable)
 ```
@@ -430,14 +432,14 @@ Use a numeric range `[0 inf]` on any indexed NUMERIC field, or a TAG filter. The
 ]
 ```
 
-**⚠️ CRITICAL: LOAD is required for reducer fields**
+**LOAD is required for reducer fields**
 
 FT.AGGREGATE does not automatically load document fields for REDUCE operations.
 Fields used in SUM, AVG, MIN, MAX, etc. must be explicitly loaded with `loadFields`
 before the GROUPBY stage. Without LOAD, reducers silently return 0.
 COUNT is the only exception — it counts rows, not field values.
 
-**❌ WRONG — SUM returns 0 because `price` is not loaded:**
+**Wrong — SUM returns 0 because `price` is not loaded:**
 ```python
 results = ft.aggregate(
     client=client,
@@ -455,7 +457,7 @@ results = ft.aggregate(
 # Every row has total = '0'!
 ```
 
-**✅ CORRECT — LOAD the field first:**
+**Correct — LOAD the field first:**
 ```python
 from glide_sync import ft
 from glide_shared.commands.server_modules.ft_options.ft_aggregate_options import (
@@ -483,19 +485,19 @@ results = ft.aggregate(
 
 Use `loadAll=True` to load all indexed fields (convenient but less efficient).
 
-**⚠️ Response format differs from valkey-py**
+**Response format differs from valkey-py**
 
 GLIDE's `ft.aggregate()` returns a flat `List[Mapping[bytes, Any]]`. There is no leading
 integer count element. This is different from valkey-py which returns `[count, row1, row2, ...]`.
 
-**❌ WRONG — assuming valkey-py format:**
+**Wrong — assuming valkey-py format:**
 ```python
 raw = ft.aggregate(client, "idx", "*", options)
 total = raw[0]        # This is a dict, not an int!
 rows = raw[1:]        # Off by one — you're skipping the first result
 ```
 
-**✅ CORRECT — GLIDE format:**
+**Correct — GLIDE format:**
 ```python
 raw = ft.aggregate(client, "idx", "*", options)
 rows = raw            # Flat list of dicts
@@ -611,7 +613,7 @@ from glide_shared.commands.server_modules.ft_options.ft_aggregate_options import
 
 ## Critical Reminders
 
-### ❌ THESE DO NOT EXIST:
+### THESE DO NOT EXIST:
 ```python
 client.ft_create(...)      # NO - Not a method
 client.ft_search(...)      # NO - Not a method
@@ -620,7 +622,7 @@ client.ft.search(...)      # NO - No ft attribute
 ft.FtCreateOptions(...)    # NO - not part of ft's public API (use: from glide_sync import FtCreateOptions)
 ```
 
-### ✅ CORRECT PATTERNS:
+### Correct PATTERNS:
 ```python
 from glide_sync import ft, FtCreateOptions, FtSearchOptions  # top-level (v2.3+)
 

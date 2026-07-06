@@ -1,20 +1,20 @@
 # Python GLIDE Anti-Patterns
 
-This document contains additional anti-patterns specific to Python GLIDE development. **Critical constraints (package selection, binary data handling, vector search) are documented in `python.md`.**
+Use when reviewing Python GLIDE code for correctness or debugging runtime failures.
 
 ---
 
 ## Testing Patterns
 
-### ❌ INCORRECT: Mocking at definition location
+### INCORRECT: Mocking at definition location
 ```python
-# ❌ WRONG: Mocking at glide_sync module
+# Wrong: Mocking at glide_sync module
 @patch("glide_sync.GlideClient")  # Won't work if already imported elsewhere
 ```
 
-### ✅ CORRECT: Mock at import location
+### Correct: Mock at import location
 ```python
-# ✅ CORRECT: Mock at the import location
+# Correct: Mock at the import location
 @patch("org.someproject.utilities.valkey.GlideClient")
 @patch("org.someproject.utilities.valkey.GlideClusterClient")
 def test_something(mock_cluster, mock_client):
@@ -25,18 +25,18 @@ def test_something(mock_cluster, mock_client):
 
 **Why:** When code does `from module import get_client`, the name is bound locally. Patching at the source module has no effect on already-imported references.
 
-### ❌ INCORRECT: Using MagicMock for async functions
+### INCORRECT: Using MagicMock for async functions
 ```python
-# ❌ WRONG: MagicMock for an async function — await hangs indefinitely
+# Wrong: MagicMock for an async function — await hangs indefinitely
 with patch("tools.search_manage_index.get_client", return_value=client):
     result = await manage_index(...)  # HANGS — await on non-coroutine
 ```
 
-### ✅ CORRECT: Use AsyncMock for async functions
+### Correct: Use AsyncMock for async functions
 ```python
 from unittest.mock import AsyncMock, patch
 
-# ✅ CORRECT: AsyncMock returns a coroutine that await can resolve
+# Correct: AsyncMock returns a coroutine that await can resolve
 mock = AsyncMock(return_value=client)
 with patch("tools.search_manage_index.get_client", mock):
     result = await manage_index(...)  # Works
@@ -57,7 +57,7 @@ with (
 
 ---
 
-### ❌ INCORRECT: Caching GLIDE client across async tests
+### INCORRECT: Caching GLIDE client across async tests
 ```python
 _client = None
 
@@ -69,7 +69,7 @@ async def client():
     yield _client  # Test 2 hangs — different event loop
 ```
 
-### ✅ CORRECT: Fresh client per test
+### Correct: Fresh client per test
 ```python
 @pytest.fixture()
 async def client():
@@ -82,7 +82,7 @@ async def client():
 
 ---
 
-### ❌ INCORRECT: Module-scoped async fixtures
+### INCORRECT: Module-scoped async fixtures
 ```python
 @pytest.fixture(scope="module")
 async def client():
@@ -91,7 +91,7 @@ async def client():
     await c.close()  # Deadlocks — fixture setup blocks the event loop
 ```
 
-### ✅ CORRECT: Function-scoped async fixtures
+### Correct: Function-scoped async fixtures
 ```python
 @pytest.fixture()
 async def client():
@@ -108,9 +108,9 @@ async def client():
 
 The `=>` token in FT.SEARCH syntax separates a filter expression from a KNN vector clause. When user-controlled input is interpolated into query strings without sanitization, an attacker can inject a KNN clause that bypasses all filters and returns all documents. In MCP server contexts, the attacker is an AI agent manipulated via prompt injection.
 
-### ❌ VULNERABLE: Interpolating user input into query without sanitization
+### VULNERABLE: Interpolating user input into query without sanitization
 ```python
-# ❌ DANGEROUS — filter_expression comes from user/agent input
+# DANGEROUS — filter_expression comes from user/agent input
 def build_query(filter_expression: str, query_text: str) -> str:
     if filter_expression and query_text.strip() == '*':
         return filter_expression  # ← attacker sends "*=>[KNN 9999 @embedding $vector AS score]"
@@ -119,9 +119,9 @@ def build_query(filter_expression: str, query_text: str) -> str:
 # Attacker bypasses year filter, gets ALL documents including secrets
 ```
 
-### ✅ CORRECT: Reject `=>` in user-supplied input before query construction
+### Correct: Reject `=>` in user-supplied input before query construction
 ```python
-# ✅ SAFE — reject injection payload before building query
+# SAFE — reject injection payload before building query
 def build_query(filter_expression: str | None, query_text: str) -> str | dict:
     if filter_expression and '=>' in filter_expression:
         return {'status': 'error', 'reason': "filter must not contain '=>'"}
@@ -142,18 +142,18 @@ GLIDE raises `RequestError` for Valkey errors. These are normal Python exception
 
 **Defensive pattern:** Pre-validate all preconditions before calling GLIDE methods that may raise. Return structured error dicts instead of letting exceptions propagate.
 
-### ❌ INCORRECT: Relying on try/except for control flow in MCP tools
+### INCORRECT: Relying on try/except for control flow in MCP tools
 ```python
-# ❌ RISKY — RequestError can crash MCP transport
+# RISKY — RequestError can crash MCP transport
 try:
     await ft.info(client, index_name)
 except RequestError:
     return {'status': 'error', 'reason': 'Index not found'}
 ```
 
-### ✅ CORRECT: Pre-validate using safe operations
+### Correct: Pre-validate using safe operations
 ```python
-# ✅ SAFE — ft.list() never raises
+# SAFE — ft.list() never raises
 if not await index_exists(client, index_name):
     return {'status': 'error', 'reason': 'Index not found'}
 await ft.info(client, index_name)  # Now safe
@@ -174,17 +174,17 @@ await ft.info(client, index_name)  # Now safe
 
 ## JSON Module Patterns
 
-### ❌ INCORRECT: Skipping json.dumps for JSON.SET sub-paths
+### INCORRECT: Skipping json.dumps for JSON.SET sub-paths
 ```python
-# ❌ WRONG — raw string without JSON encoding
+# Wrong — raw string without JSON encoding
 await client.custom_command(['JSON.SET', key, '$.name', 'Alice'])
 ```
 
-### ✅ CORRECT: Always use json.dumps for JSON.SET values
+### Correct: Always use json.dumps for JSON.SET values
 ```python
 import json
 
-# ✅ CORRECT — json.dumps produces '"Alice"' which is valid JSON
+# Correct — json.dumps produces '"Alice"' which is valid JSON
 await client.custom_command(['JSON.SET', key, '$.name', json.dumps('Alice')])
 
 # Works for all types and all paths:
@@ -197,13 +197,13 @@ await client.custom_command(['JSON.SET', key, '$.tags', json.dumps(["a", "b"])])
 
 ---
 
-### ❌ INCORRECT: Calling JSON array ops without checking key/type
+### INCORRECT: Calling JSON array ops without checking key/type
 ```python
-# ❌ RISKY — crashes if key doesn't exist or path isn't an array
+# RISKY — crashes if key doesn't exist or path isn't an array
 await client.custom_command(['JSON.ARRPOP', key, '$.tags'])
 ```
 
-### ✅ CORRECT: Pre-validate with JSON.TYPE
+### Correct: Pre-validate with JSON.TYPE
 ```python
 async def require_array(client, key: str, path: str) -> dict | None:
     """Returns error dict if not an array, None if OK."""
@@ -229,16 +229,16 @@ await client.custom_command(['JSON.ARRPOP', key, '$.tags'])
 
 ## Performance Optimization
 
-### ❌ INCORRECT: Fetching entire JSON object
+### INCORRECT: Fetching entire JSON object
 ```python
-# ❌ Inefficient — must fetch/parse entire object
+# Inefficient — must fetch/parse entire object
 user = json.loads(await client.get("user:123"))
 name = user["name"]
 ```
 
-### ✅ CORRECT: Use JSON.GET with path
+### Correct: Use JSON.GET with path
 ```python
-# ✅ Efficient — fetch only needed fields
+# Efficient — fetch only needed fields
 name = await client.json_get("user:123", "$.name")
 ```
 
@@ -248,7 +248,7 @@ name = await client.json_get("user:123", "$.name")
 
 ## Code Patterns
 
-### ❌ INCORRECT: Exceptions as Control Flow
+### INCORRECT: Exceptions as Control Flow
 ```python
 async def fetch_data(key: str) -> str:
     value = await client.get(key)
@@ -257,7 +257,7 @@ async def fetch_data(key: str) -> str:
     return value
 ```
 
-### ✅ CORRECT: Status-Based Returns
+### Correct: Status-Based Returns
 ```python
 async def fetch_data(key: str) -> dict:
     value = await client.get(key)
@@ -270,7 +270,7 @@ async def fetch_data(key: str) -> dict:
 
 ---
 
-### ❌ INCORRECT: Static Method-Only Classes
+### INCORRECT: Static Method-Only Classes
 ```python
 class CacheUtils:
     @staticmethod
@@ -278,7 +278,7 @@ class CacheUtils:
         return await client.get(f"user:{user_id}")
 ```
 
-### ✅ CORRECT: Module-Level Functions
+### Correct: Module-Level Functions
 ```python
 async def get_user(client, user_id: str) -> str:
     return await client.get(f"user:{user_id}")
@@ -288,7 +288,7 @@ async def get_user(client, user_id: str) -> str:
 
 ---
 
-### ❌ INCORRECT: Tight Coupling
+### INCORRECT: Tight Coupling
 ```python
 class UserService:
     def __init__(self, host: str, port: int):
@@ -296,7 +296,7 @@ class UserService:
         self.client = await GlideClient.create(self.config)
 ```
 
-### ✅ CORRECT: Protocol-Based Abstraction
+### Correct: Protocol-Based Abstraction
 ```python
 from typing import Protocol
 
@@ -313,12 +313,12 @@ class UserService:
 
 ---
 
-### ❌ INCORRECT: Wildcard Imports
+### INCORRECT: Wildcard Imports
 ```python
 from glide import *  # Namespace pollution
 ```
 
-### ✅ CORRECT: Explicit Imports
+### Correct: Explicit Imports
 ```python
 from glide import GlideClient, GlideClientConfiguration, NodeAddress
 ```

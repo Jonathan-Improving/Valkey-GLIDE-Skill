@@ -1,21 +1,21 @@
 # PHP GLIDE Anti-Patterns
 
-This document contains anti-patterns specific to PHP GLIDE development. These patterns should be avoided in production code.
+Use when reviewing PHP GLIDE code for correctness or debugging extension/install issues.
 
 ---
 
 ## Common Pitfalls
 
-### ❌ INCORRECT: Forgetting exec()
+### INCORRECT: Forgetting exec()
 ```php
-// ❌ Wrong - commands queued but not executed
+// Wrong - commands queued but not executed
 $client->multi();
 $client->set('key', 'value');
 ```
 
-### ✅ CORRECT: Always call exec()
+### Correct: Always call exec()
 ```php
-// ✅ Correct
+// Correct
 $client->multi();
 $client->set('key', 'value');
 $results = $client->exec();
@@ -25,18 +25,18 @@ $results = $client->exec();
 
 ---
 
-### ❌ INCORRECT: CROSSSLOT in Transactions
+### INCORRECT: CROSSSLOT in Transactions
 ```php
-// ❌ Wrong - different slots
+// Wrong - different slots
 $client->multi();
 $client->set('key1', 'value1');
 $client->set('key2', 'value2');
 $client->exec();  // Error
 ```
 
-### ✅ CORRECT: Use hash tags
+### Correct: Use hash tags
 ```php
-// ✅ Correct - use hash tags
+// Correct - use hash tags
 $client->multi();
 $client->set('{user}:1', 'value1');
 $client->set('{user}:2', 'value2');
@@ -47,15 +47,15 @@ $client->exec();
 
 ---
 
-### ❌ INCORRECT: Assuming extension is loaded
+### INCORRECT: Assuming extension is loaded
 ```php
-// ❌ Wrong - assuming extension is loaded
+// Wrong - assuming extension is loaded
 $client = new ValkeyGlide();
 ```
 
-### ✅ CORRECT: Check extension first
+### Correct: Check extension first
 ```php
-// ✅ Correct - check first
+// Correct - check first
 if (!extension_loaded('valkey_glide')) {
     die('valkey_glide extension not loaded. Add extension=valkey_glide to php.ini');
 }
@@ -66,16 +66,16 @@ $client = new ValkeyGlide();
 
 ---
 
-### ❌ INCORRECT: Wrong Client for Cluster
+### INCORRECT: Wrong Client for Cluster
 ```php
-// ❌ Wrong
+// Wrong
 $client = new ValkeyGlide();
 $client->connect(addresses: [['host' => 'localhost', 'port' => 7000]]);
 ```
 
-### ✅ CORRECT: Use ValkeyGlideCluster
+### Correct: Use ValkeyGlideCluster
 ```php
-// ✅ Correct
+// Correct
 $client = new ValkeyGlideCluster(
     addresses: [['host' => 'localhost', 'port' => 7000]]
 );
@@ -87,16 +87,16 @@ $client = new ValkeyGlideCluster(
 
 ## Performance Optimization
 
-### ❌ INCORRECT: Fetching entire JSON object
+### INCORRECT: Fetching entire JSON object
 ```php
-// ❌ Inefficient — must fetch/parse entire object
+// Inefficient — must fetch/parse entire object
 $client->set('user:123', json_encode($userData));
 $email = json_decode($client->get('user:123'), true)['email'];
 ```
 
-### ✅ CORRECT: Use Hash for structured data
+### Correct: Use Hash for structured data
 ```php
-// ✅ Efficient — fetch only needed fields
+// Efficient — fetch only needed fields
 $client->hSet('user:123', 'name', 'John', 'email', 'john@example.com', 'age', '30');
 $email = $client->hGet('user:123', 'email');
 ```
@@ -107,7 +107,7 @@ $email = $client->hGet('user:123', 'email');
 
 ## Architecture Patterns
 
-### ❌ INCORRECT: God Object
+### INCORRECT: God Object
 ```php
 class ValkeyManager {
     // User management
@@ -124,7 +124,7 @@ class ValkeyManager {
 }
 ```
 
-### ✅ CORRECT: Single Responsibility Principle
+### Correct: Single Responsibility Principle
 ```php
 class UserRepository {
     private $client;
@@ -155,7 +155,7 @@ class SessionRepository {
 
 ---
 
-### ❌ INCORRECT: If-Else Chains
+### INCORRECT: If-Else Chains
 ```php
 class CacheManager {
     public function cache($key, $value, $strategy) {
@@ -169,7 +169,7 @@ class CacheManager {
 }
 ```
 
-### ✅ CORRECT: Strategy Pattern (Open-Closed Principle)
+### Correct: Strategy Pattern (Open-Closed Principle)
 ```php
 interface CacheStrategy {
     public function cache($client, $key, $value);
@@ -192,7 +192,7 @@ class CacheManager {
 
 ---
 
-### ❌ INCORRECT: Tight Coupling
+### INCORRECT: Tight Coupling
 ```php
 class UserService {
     public function __construct() {
@@ -203,7 +203,7 @@ class UserService {
 }
 ```
 
-### ✅ CORRECT: Dependency Injection (Dependency Inversion Principle)
+### Correct: Dependency Injection (Dependency Inversion Principle)
 ```php
 interface CacheClient {
     public function get($key);
@@ -240,13 +240,13 @@ class UserService {
 
 The `=>` token in FT.SEARCH syntax separates a filter from a KNN vector clause. If user-controlled input is interpolated into query strings without sanitization, an attacker can inject a KNN clause that bypasses all filters and returns all documents.
 
-### ❌ INCORRECT: Interpolating user input without sanitization
+### INCORRECT: Interpolating user input without sanitization
 ```php
-// ❌ VULNERABLE — $userFilter could contain "=>[KNN ...]"
+// VULNERABLE — $userFilter could contain "=>[KNN ...]"
 $query = "({$userFilter}) {$searchText}";
 ```
 
-### ✅ CORRECT: Reject `=>` before query construction
+### Correct: Reject `=>` before query construction
 ```php
 if ($userFilter && str_contains($userFilter, '=>')) {
     throw new \InvalidArgumentException("Filter must not contain '=>'");

@@ -1,4 +1,6 @@
-# PHP GLIDE Skill
+# PHP GLIDE Guide
+
+Use when writing or reviewing PHP code that uses the valkey_glide C extension.
 
 ## External Resources
 - `../assets/php-config.php` - Client connection config templates, TLS/SSL, authentication (password, username, AWS IAM), cluster, standalone, PHPRedis compatibility, etc.
@@ -7,7 +9,7 @@
 ## Package Selection
 
 ```php
-// ✅ Correct - PHP Extension
+// Correct - PHP Extension
 extension=valkey_glide
 
 // Check if loaded
@@ -15,7 +17,7 @@ if (!extension_loaded('valkey_glide')) {
     die('valkey_glide extension not loaded');
 }
 
-// ❌ Wrong - Don't use PHPRedis directly
+// Wrong - Don't use PHPRedis directly
 // extension=redis
 ```
 

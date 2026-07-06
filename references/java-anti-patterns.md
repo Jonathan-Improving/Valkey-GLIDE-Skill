@@ -1,14 +1,14 @@
 # Java GLIDE Anti-Patterns
 
-This document contains anti-patterns specific to Java GLIDE development. These patterns should be avoided in production code.
+Use when reviewing Java GLIDE code for correctness or debugging CompletableFuture/exception issues.
 
 ---
 
 ## Package Selection
 
-### ❌ INCORRECT: Don't use Jedis or Lettuce
+### INCORRECT: Don't use Jedis or Lettuce
 ```java
-// NEVER use these
+// Do not use these
 import redis.clients.jedis.*;
 import io.lettuce.core.*;
 ```
@@ -19,14 +19,14 @@ import io.lettuce.core.*;
 
 ## Resource Management
 
-### ❌ INCORRECT: Resource leak
+### INCORRECT: Resource leak
 ```java
 GlideClient client = GlideClient.createClient(config).get();
 client.set("key", "value").get();
 // Client never closed!
 ```
 
-### ✅ CORRECT: Use try-with-resources
+### Correct: Use try-with-resources
 ```java
 try (GlideClient client = GlideClient.createClient(config).get()) {
     client.set("key", "value").get();
@@ -39,7 +39,7 @@ try (GlideClient client = GlideClient.createClient(config).get()) {
 
 ## Concurrency
 
-### ❌ INCORRECT: Swallow InterruptedException
+### INCORRECT: Swallow InterruptedException
 ```java
 try {
     String value = future.get();
@@ -48,7 +48,7 @@ try {
 }
 ```
 
-### ✅ CORRECT: Restore interrupt status
+### Correct: Restore interrupt status
 ```java
 try {
     String value = future.get();
@@ -64,7 +64,7 @@ try {
 
 ## Exception Handling (Blocking Calls)
 
-### ❌ INCORRECT: Catch wrapped exception directly
+### INCORRECT: Catch wrapped exception directly
 ```java
 try {
     client.lpop("string:key").get();
@@ -73,7 +73,7 @@ try {
 }
 ```
 
-### ✅ CORRECT: Unwrap ExecutionException
+### Correct: Unwrap ExecutionException
 ```java
 try {
     client.lpop("string:key").get();
@@ -90,7 +90,7 @@ try {
 
 ## Exception Handling (Async Chains)
 
-### ✅ CORRECT: Direct exception access
+### Correct: Direct exception access
 ```java
 client.lpop("string:key")
     .exceptionally(e -> {
@@ -107,7 +107,7 @@ client.lpop("string:key")
 
 ## Exception Handling (General)
 
-### ❌ INCORRECT: Broad Exception Handling
+### INCORRECT: Broad Exception Handling
 ```java
 // DON'T catch Exception - too broad
 try {
@@ -117,7 +117,7 @@ try {
 }
 ```
 
-### ✅ CORRECT: Specific Exception Handling
+### Correct: Specific Exception Handling
 
 **Async:**
 ```java
@@ -152,16 +152,16 @@ try {
 
 ## Performance Optimization
 
-### ❌ INCORRECT: Fetching entire JSON object
+### INCORRECT: Fetching entire JSON object
 ```java
-// ❌ Inefficient — must fetch/parse entire object
+// Inefficient — must fetch/parse entire object
 client.set("user:123", mapper.writeValueAsString(user)).get();
 Map<String, Object> parsed = mapper.readValue(client.get("user:123").get(), Map.class);
 ```
 
-### ✅ CORRECT: Use Hash for structured data
+### Correct: Use Hash for structured data
 ```java
-// ✅ Efficient — fetch only needed fields
+// Efficient — fetch only needed fields
 client.hset("user:123", Map.of("name", "John", "email", "john@example.com", "age", "30")).get();
 String name = client.hget("user:123", "name").get();
 ```
@@ -172,14 +172,14 @@ String name = client.hget("user:123", "name").get();
 
 ## Design Patterns
 
-### ❌ INCORRECT: Primitive obsession
+### INCORRECT: Primitive obsession
 ```java
 void storeUser(GlideClient client, String userId, String sessionId) {
     // Easy to swap parameters - compiles but wrong!
 }
 ```
 
-### ✅ CORRECT: Type-safe value objects
+### Correct: Type-safe value objects
 ```java
 class UserId {
     private final String value;
@@ -203,7 +203,7 @@ void storeUser(GlideClient client, UserId userId, SessionId sessionId) {
 
 ## Testing
 
-### ❌ INCORRECT: Depend on external Valkey
+### INCORRECT: Depend on external Valkey
 ```java
 @Test
 void testUserService() {
@@ -212,7 +212,7 @@ void testUserService() {
 }
 ```
 
-### ✅ CORRECT: Use test doubles
+### Correct: Use test doubles
 ```java
 @Test
 void testUserService() {

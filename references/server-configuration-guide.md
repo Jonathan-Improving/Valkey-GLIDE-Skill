@@ -1,4 +1,6 @@
-# Valkey/ElastiCache Server Configuration Guide
+# Server Configuration Guide
+
+Use when configuring Valkey/ElastiCache infrastructure - cluster sizing, memory policy, node types, monitoring.
 
 ## Cluster Architecture Selection
 

@@ -1,4 +1,6 @@
-# C# GLIDE Skill
+# C# GLIDE Guide
+
+Use when writing or reviewing C# code that uses the Valkey.Glide NuGet package.
 
 ## External Resources
 - `../assets/csharp-config.cs` - Client connection config templates, TLS/SSL, authentication (password, username, AWS IAM), cluster, standalone, database selection, protocol version, etc.
@@ -9,12 +11,12 @@
 ## Package Selection
 
 ```csharp
-// ✅ Correct
+// Correct
 using Valkey.Glide;
 using Valkey.Glide.Pipeline;
 using static Valkey.Glide.ConnectionConfiguration;
 
-// ❌ Wrong
+// Wrong
 using StackExchange.Redis;  // Different library (though Valkey.Glide provides compatibility layer)
 ```
 
@@ -342,7 +344,7 @@ var stats = statsTask.Result;
 ## Thread Safety
 
 ```csharp
-// ✅ Batch created per scope (because Batch objects are NOT thread-safe — create one per operation scope.)
+// Batch created per scope (because Batch objects are NOT thread-safe — create one per operation scope.)
 async Task ProcessAsync(GlideClient client)
 {
     var batch = new Batch(isAtomic: false);

@@ -1,4 +1,6 @@
-# General Go Guidelines
+# Go GLIDE Guide
+
+Use when writing or reviewing Go code that uses github.com/valkey-io/valkey-glide/go/v2.
 
 ## External Resources
 - `../assets/go-config.go` - Client connection config templates, TLS/SSL, authentication (password, username, AWS IAM), cluster, standalone, etc.
@@ -16,7 +18,7 @@
 
 ## Package Selection
 
-### ✅ CORRECT: Use GLIDE
+### Correct: Use GLIDE
 
 **Installation:**
 ```bash
@@ -40,9 +42,9 @@ import (
 - Standard Go module structure
 - Context required for all operations
 
-### ❌ INCORRECT: Don't use go-redis
+### INCORRECT: Don't use go-redis
 ```go
-// NEVER use these
+// Do not use these
 import "github.com/redis/go-redis/v9"
 ```
 
@@ -123,7 +125,7 @@ func (client *ClusterClient) ExecWithOptions(ctx context.Context, batch pipeline
 Misuse won't compile:
 ```go
 standaloneBatch := pipeline.NewStandaloneBatch(false)
-clusterClient.Exec(ctx, *standaloneBatch, true) // ❌ COMPILE ERROR: cannot use StandaloneBatch as ClusterBatch
+clusterClient.Exec(ctx, *standaloneBatch, true) // COMPILE ERROR: cannot use StandaloneBatch as ClusterBatch
 ```
 
 ### raiseOnError Semantics
@@ -217,7 +219,7 @@ results, err := clusterClient.Exec(ctx, *pipelineBatch, true)
 - Type mismatch (wrong batch type for client) is a **compile-time error**, not runtime
 - Returns `([]any, error)` — see raiseOnError table above
 - See SKILL.md for retry strategy decision matrix
-- **Slice parameters**: Batch methods mirror standalone signatures. Commands like `Del`, `HDel`, `Exists`, `Unlink` take `[]string` — use `batch.Del([]string{"key1", "key2"})` not `batch.Del("key")`
+- **Slice parameters**: Batch methods like `Del`, `HDel`, `Exists`, `Unlink` take `[]string` - use `batch.Del([]string{"key1", "key2"})` not `batch.Del("key")`. Passing a single string does not compile.
 
 ### Retry Strategies (Cluster Only)
 
@@ -452,7 +454,7 @@ if err := g.Wait(); err != nil { /* handle */ }
 ## Goroutine Safety
 
 ```go
-// ✅ Batch created per goroutine because Batch objects are NOT goroutine safe
+// Batch created per goroutine because Batch objects are NOT goroutine safe
 go func() {
     batch := pipeline.NewStandaloneBatch(false)
     batch.Get("key1")

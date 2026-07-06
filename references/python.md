@@ -1,6 +1,8 @@
-# General Python Guidelines
+# Python GLIDE Guide
 
-## 🚨 CRITICAL WARNINGS - READ FIRST
+Use when writing or reviewing Python code that uses valkey-glide (async via `glide` or sync via `glide_sync`).
+
+## Key Constraints
 
 ### Vector Search / FT Module
 
@@ -36,14 +38,14 @@
 
 ### Package Selection
 
-#### ❌ NEVER use the Redis fork
+#### Do not use the Redis fork
 ```python
-# NEVER use these imports
+# Do not use these imports
 from valkey import Valkey
 from valkey.commands.search import Search
 ```
 
-#### ✅ ALWAYS use GLIDE
+#### Use GLIDE
 
 **Synchronous (for sync applications):**
 ```python
@@ -85,13 +87,13 @@ from glide_shared.commands.server_modules.ft_options.ft_create_options import (
 
 ### Binary Data Handling
 
-**❌ WRONG - Not decoding bytes from search results:**
+**Wrong - Not decoding bytes from search results:**
 ```python
 results = ft.search(client, index_name, query)
 print(results[1].keys())  # b'doc:1' instead of 'doc:1'
 ```
 
-**✅ CORRECT - Decode bytes to strings:**
+**Correct - Decode bytes to strings:**
 ```python
 for key, fields in results[1].items():
     str_key = key.decode() if isinstance(key, bytes) else key
@@ -184,12 +186,12 @@ def get_client(valkey_url: str, **kwargs) -> GlideClient | GlideClusterClient:
 
 ## Vector Search Constraints
 
-**❌ WRONG - Adding .sort_by() to KNN queries:**
+**Wrong - Adding .sort_by() to KNN queries:**
 ```python
 results = ft.search(...).sort_by("score")  # Causes error
 ```
 
-**✅ CORRECT - KNN results already sorted:**
+**Correct - KNN results already sorted:**
 ```python
 results = ft.search(...)  # Already sorted by score
 ```
@@ -208,14 +210,14 @@ results = ft.search(
 )
 ```
 
-**❌ WRONG - Using ft.FtCreateOptions:**
+**Wrong - Using ft.FtCreateOptions:**
 ```python
 from glide_sync import ft
 ft.create(client, index_name, schema, ft.FtCreateOptions(prefixes=["doc:"]))
 # ft.FtCreateOptions does NOT exist — FtCreateOptions is a standalone class
 ```
 
-**✅ CORRECT - Import FtCreateOptions directly:**
+**Correct - Import FtCreateOptions directly:**
 ```python
 from glide_sync import ft, FtCreateOptions  # top-level import (v2.3+)
 ft.create(client, index_name, schema, FtCreateOptions(prefixes=["doc:"]))
@@ -233,7 +235,7 @@ being a dictionary of those documents.  See the section on *Binary Data Handling
 from glide_sync import ft
 from glide_shared.commands.server_modules.ft_options.ft_search_options import FtSearchOptions
 
-# ⚠️ SECURITY: Sanitize user-supplied filter and vector_field before interpolation.
+# SECURITY: Sanitize user-supplied filter and vector_field before interpolation.
 # The '=>' token delimits filter from KNN clause — if user input contains '=>',
 # an attacker can inject a KNN query that bypasses all filters.
 if filter and '=>' in filter:
@@ -316,7 +318,7 @@ ft.create(
 ```
 
 ### Index Creation
-⚠️ **CRITICAL**: Do NOT use `client.ft_create()` to create an index.
+Do NOT use `client.ft_create()` to create an index.
 
 **Key Points:**
 - Use `ft.create()` function, not a method
@@ -341,7 +343,7 @@ client.hset(key, fields)
 
 ## Check Index Exists / Drop Index
 
-**⚠️ Use `ft.list()` — not `ft.info()` — to check index existence.** `ft.info()` raises `RequestError` on missing indices, which can crash MCP server transports. `ft.list()` always returns cleanly.
+**Use `ft.list()` — not `ft.info()` — to check index existence.** `ft.info()` raises `RequestError` on missing indices, which can crash MCP server transports. `ft.list()` always returns cleanly.
 
 ```python
 from glide_sync import ft

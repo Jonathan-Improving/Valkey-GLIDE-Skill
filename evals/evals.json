@@ -22,7 +22,7 @@
     {
       "id": 4,
       "prompt": "Can I use ft.FtCreateOptions(...) in valkey-glide Python to create index options?",
-      "expected_output": "Should explain that while ft.FtCreateOptions technically resolves at runtime (because ft.py imports it internally), it is not the intended public API. The correct pattern is to import FtCreateOptions directly: from glide_sync import FtCreateOptions. Should NOT say it raises AttributeError — it works but is undocumented/unintended.",
+      "expected_output": "Should explain that while ft.FtCreateOptions technically resolves at runtime (because ft.py imports it internally), it is not the intended public API. The correct pattern is to import FtCreateOptions directly: from glide_sync import FtCreateOptions. Should NOT say it raises AttributeError \u2014 it works but is undocumented/unintended.",
       "files": []
     },
     {
@@ -144,7 +144,7 @@
     {
       "id": 10,
       "prompt": "Review this Python code for correctness:\n```python\nfrom glide_sync import GlideClient\n\ndef create_index(client: GlideClient):\n    client.ft().create('products', {\n        'name': {'type': 'TEXT'},\n        'price': {'type': 'NUMERIC'},\n    })\n```",
-      "expected_output": "MUST identify client.ft().create() as incorrect — this is the redis-py pattern. MUST recommend ft.create(client, ...) with proper schema objects (TextField, NumericField). Should mention importing ft from glide_sync.",
+      "expected_output": "MUST identify client.ft().create() as incorrect \u2014 this is the redis-py pattern. MUST recommend ft.create(client, ...) with proper schema objects (TextField, NumericField). Should mention importing ft from glide_sync.",
       "assertions": [
         {
           "id": "identifies-error",
@@ -190,19 +190,19 @@
     {
       "id": 12,
       "prompt": "Review this Go code using valkey-glide. Is there a bug here?\n```go\nfunc flushUserCache(ctx context.Context, client *glide.Client, userIDs []string) error {\n    batch := pipeline.NewStandaloneBatch(false)\n    for _, id := range userIDs {\n        batch.Del(\"user:\" + id)\n    }\n    _, err := client.Exec(ctx, *batch, true)\n    return err\n}\n```",
-      "expected_output": "Should say this is CORRECT / not a bug. Discarding []any is fine because raiseOnError=true means the first error is raised via the error return value. The _ discard is safe. Should NOT claim 'silent partial failures' or 'errors are lost'.",
+      "expected_output": "Should identify that batch.Del takes []string, not a single string. The code 'batch.Del(\"user:\" + id)' will not compile because Del requires a []string slice argument. The fix is batch.Del([]string{\"user:\" + id}). Should NOT claim the code is correct or bug-free.",
       "assertions": [
         {
-          "id": "no-silent-failure-claim",
-          "text": "Response does NOT claim silent failures, lost errors, or that discarding results hides errors",
-          "type": "negative_match",
-          "pattern": "(silent.*(fail|error|loss)|errors?.*(lost|hidden|swallow|discard|miss)|discard.*(error|fail)|miss.*(error|fail))"
+          "id": "identifies-del-type-error",
+          "text": "Response identifies that Del takes []string, not a single string",
+          "type": "positive_match",
+          "pattern": "(\\[\\]string|slice|type.*(mismatch|error)|won.t compile|will not compile|does not compile)"
         },
         {
-          "id": "acknowledges-correct",
-          "text": "Response acknowledges the code is correct or that raiseOnError=true surfaces errors via err return",
-          "type": "positive_match",
-          "pattern": "(correct|valid|fine|no bug|not a bug|raiseOnError.*true.*(raise|return|surface|report)|err.*(capture|contain|receive|get|have).*error)"
+          "id": "does-not-claim-correct",
+          "text": "Response does NOT claim the code is correct or has no bug",
+          "type": "negative_match",
+          "pattern": "(code is correct|no bug|not a bug|code.*(fine|valid|correct))"
         }
       ],
       "files": []
@@ -210,7 +210,7 @@
     {
       "id": 13,
       "prompt": "What happens if I accidentally use pipeline.NewStandaloneBatch with a ClusterClient in valkey-glide Go? Will it panic at runtime?",
-      "expected_output": "Should say it WON'T COMPILE — Go's type system prevents this at compile time. Client.Exec takes StandaloneBatch, ClusterClient.Exec takes ClusterBatch. Should NOT say 'runtime error', 'panic', or 'will fail at runtime'.",
+      "expected_output": "Should say it WON'T COMPILE \u2014 Go's type system prevents this at compile time. Client.Exec takes StandaloneBatch, ClusterClient.Exec takes ClusterBatch. Should NOT say 'runtime error', 'panic', or 'will fail at runtime'.",
       "assertions": [
         {
           "id": "says-compile-time",
