@@ -136,6 +136,96 @@ def build_query(filter_expression: str | None, query_text: str) -> str | dict:
 
 ---
 
+## valkey-search 1.3 FT Patterns
+
+Full rules and citations: [python-ft-api.md § Server Version Matrix](python-ft-api.md#server-version-matrix-valkey-search-12-vs-13). Citation legend as in that file.
+
+### INCORRECT: Relying on `LOAD … AS` at the default emulate-release
+```python
+# search.emulate-release defaults to 1.0.0 even on a 1.3 server
+ft.aggregate(client, "idx", "*", FtAggregateOptions(loadFields=[LoadField("price", alias="cost")]))
+# RequestError: Index: field `AS` does not exist   ‹GT:2280›
+```
+
+### Correct: Rename only where emulate-release ≥ 1.3.0 is guaranteed, else rename client-side
+```python
+rows = ft.aggregate(client, "idx", "*", FtAggregateOptions(loadFields=["price"]))
+rows = [{b"cost": r[b"price"], **{k: v for k, v in r.items() if k != b"price"}} for r in rows]
+```
+
+**Why:** `LOAD … AS` is a compatibility fix gated on `search.emulate-release ≥ 1.3.0`; below that `AS` is read as a field name ‹VS:COMPATIBILITY.md:192; VS:src/valkey_search_options.cc:876›.
+
+### INCORRECT: Passing a bytes vector as a `$` reference in FT.HYBRID
+```python
+FtHybridVsimArm("vec", b"$q", k=5), FtHybridOptions(params={"q": q_bytes})
+# b"$q" is sent as a 3-byte raw vector, not a reference to params["q"]
+```
+
+### Correct: bytes inline, or a `str` reference plus your own params entry
+```python
+FtHybridVsimArm("vec", q_bytes, k=5)                                   # GLIDE generates PARAMS
+FtHybridVsimArm("vec", "$q", k=5), FtHybridOptions(params={"q": q_bytes})
+```
+
+**Why:** `is_param_reference()` is true only for a `str` starting with `$`; a packed vector may legitimately begin with byte `0x24` ‹G:ft_hybrid_options.py:244-261; GT:4345›.
+
+### INCORRECT: Expecting a cursor to be readable on a replica
+```python
+# Hand-routed cursor read to a replica / any node
+client.custom_command(["FT.CURSOR", "READ", "idx", str(cid)], route=RandomNode())
+# RequestError: Cursor not found (when it lands on a node other than the one holding the cursor) ‹GA:729-733›
+```
+
+### Correct: Use ft.cursor_read and stop at 0
+```python
+rows, cid = ft.aggregate(client, "idx", "*", FtAggregateOptions(with_cursor=FtWithCursor(count=100)))
+while cid != 0:
+    page, cid = ft.cursor_read(client, "idx", cid)
+    rows.extend(page)
+```
+
+**Why:** A cursor exists only on the node that ran the query ‹VS:docs/commands/ft.cursor.md:12›. GLIDE routes WITHCURSOR queries and FT.CURSOR to the primary of the index's slot regardless of `ReadFrom` ‹GA:554-555; GT:3821›.
+
+### INCORRECT: `in_keys=[]` to mean "no restriction"
+```python
+FtSearchOptions(in_keys=allowed or [])   # empty → INKEYS 0 → zero results
+```
+
+### Correct
+```python
+FtSearchOptions(in_keys=allowed or None)
+```
+‹G:ft_search_options.py:173-178,254-258; GT:2432›
+
+### INCORRECT: VECTOR_RANGE as a KNN pre-filter
+```python
+ft.search(client, "idx", "@vec:[VECTOR_RANGE 5 $b]=>[KNN 3 @vec $b]", FtSearchOptions(params={"b": q}))
+# RequestError: VECTOR_RANGE predicates are not supported in the filter of a KNN query
+```
+
+### Correct: one or the other
+```python
+ft.search(client, "idx", "*=>[KNN 3 @vec $b]", FtSearchOptions(params={"b": q}))
+ft.search(client, "idx", "@vec:[VECTOR_RANGE 5 $b]=>{$yield_distance_as: d}",
+          FtSearchOptions(params={"b": q}, return_fields=[ReturnField("d")]))
+```
+‹VS:src/query/search.cc:2492-2498; GT:2645›
+
+### INCORRECT: Blue/green index swap with aliases
+```python
+ft.aliasupdate(client, "products", "products_v2")   # RequestError on valkey-search ≤ 1.3
+```
+
+### Correct: Keep the active index name in a key
+```python
+client.set("products:active_index", "products_v2")
+active = client.get("products:active_index").decode()
+ft.search(client, active, "@price:[0 100]")
+```
+‹VS:src/commands/commands.h:44-53; GA:283›
+
+---
+
 ## MCP / Server Framework Patterns
 
 GLIDE raises `RequestError` for Valkey errors. These are normal Python exceptions, but in MCP server frameworks (e.g., FastMCP), unhandled exceptions during concurrent tool calls can crash the entire transport (stdio pipe closes, server dies). The crash is in the framework's async dispatch, not in GLIDE's native layer.

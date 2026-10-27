@@ -1,6 +1,15 @@
 # Python FT (Search) Module API Reference
 
-Use when writing or reviewing Python code that calls ft.create, ft.search, ft.aggregate, ft.dropindex, or ft.info.
+Use when writing or reviewing Python code that calls ft.create, ft.search, ft.aggregate, ft.hybrid, ft.cursor_read/cursor_del, ft.dropindex, or ft.info.
+
+## Contents
+
+- [Key Rules](#key-rules) · [Server Version Matrix](#server-version-matrix-valkey-search-12-vs-13) · [Import Pattern](#import-pattern)
+- [Field Constructors](#field-constructor-signatures) · [ft.create()](#ftcreate) · [ft.search()](#ftsearch) · [Vector Range](#vector-range-queries-search--13)
+- [ft.aggregate()](#ftaggregate) · [Reducers](#reducers) · [Cursors](#cursors-ftcursor_read--ftcursor_del-search--13) · [ft.hybrid()](#fthybrid-search--13)
+- [ft.info()](#ftinfo) · [Commands the Server Does Not Implement](#commands-the-server-does-not-implement) · [Common Mistakes](#common-mistakes)
+
+**Citation legend.** `G:` = valkey-glide @ `b7c92e92b`, file under `python/glide-shared/glide_shared/commands/server_modules/ft_options/`. `GA:` = `python/glide-async/python/glide/async_commands/ft.py` @ `b7c92e92b` (the sync twin `glide_sync/sync_commands/ft.py` has identical signatures). `GT:` = `python/tests/async_tests/tests_server_modules/test_ft.py` @ `b7c92e92b`. `VS:` = valkey-search @ `1.3.0-rc1` (`e31273a`).
 
 ## Key Rules
 
@@ -8,6 +17,24 @@ Use when writing or reviewing Python code that calls ft.create, ft.search, ft.ag
 2. **ALL FUNCTIONS ARE MODULE-LEVEL**: Import `ft` and call `ft.function(client, ...)`
 3. **DO NOT INFER FROM REDIS-PY**: This is NOT Redis-py. Redis-py patterns DO NOT apply.
 4. **THIS IS THE ONLY DOCUMENTATION**: Vector search API is not documented elsewhere. Do not infer usage from other sources.
+5. **KNOW THE SERVER VERSION**: several rules below differ between valkey-search 1.2 and 1.3, and some 1.3 behaviour also depends on `search.emulate-release`. Check both before choosing a pattern.
+
+## Server Version Matrix (valkey-search 1.2 vs 1.3)
+
+Two things decide behaviour: the **module version** (1.2 or 1.3) and, on 1.3, the **`search.emulate-release`** config. Compatibility fixes that change a reply or a parse are gated on `search.emulate-release >= 1.3.0`; the default is the current major `.0.0`, i.e. **`1.0.0` for all of 1.x**, so a stock 1.3 server keeps the 1.2 behaviour for every gated item ‹VS:src/valkey_search_options.cc:876,896-901; VS:COMPATIBILITY.md:172›. Opt in with `CONFIG SET search.emulate-release 1.3.0` ‹VS:integration/compatibility_test.py:984›.
+
+| Topic | search < 1.3 | search ≥ 1.3, default emulate-release (1.0.0) | search ≥ 1.3, emulate-release ≥ 1.3.0 |
+|---|---|---|---|
+| Bare `*` query (FT.SEARCH / FT.AGGREGATE) | `RequestError: Invalid query string syntax` — use `@num:[-inf +inf]` or a tag filter | Match-all (#960, not gated) ‹VS:src/query/search.cc:2447-2450; GT:2397,2500› | same |
+| Reducer / SORTBY / APPLY / FILTER fields without LOAD | Silently read as missing (SUM → 0) | Auto-loaded (#1341, not gated; vector fields excluded) ‹VS:src/commands/ft_aggregate.cc:50-93; GT:2500› | same |
+| `LoadField(..., alias=...)` (`LOAD … AS`) | Error | Error: ``Index: field `AS` does not exist`` ‹GT:2280› | Column renamed ‹VS:COMPATIBILITY.md:192; GT:2280› |
+| SORTBY retained rows with adjacent LIMIT | SORTBY keeps its MAX (default 10) | same as < 1.3 | Adjacent LIMIT widens to offset+count ‹VS:COMPATIBILITY.md:201; G:ft_aggregate_options.py:30-42; GT:2912› |
+| REDUCE without `name` → column name | `COUNT_DISTINCT(@rating)` style | same | `__generated_aliascount_distinctrating` style ‹VS:COMPATIBILITY.md:189› |
+| FT.INFO `index_definition` | 6 elements, `default_score` = `"1"`, no `score_field` | same | 8 elements, real `default_score`, `score_field` pair ‹VS:COMPATIBILITY.md:190; GA:326-329; GT:3299› |
+| JSON index FT.AGGREGATE column names | Schema identifier (`$.price`) | same | As written in the query (`@price` → `price`) ‹VS:COMPATIBILITY.md:191› |
+| `in_keys`, VECTOR_RANGE, cursors, FT.HYBRID, TOLIST/FIRST_VALUE/RANDOM_SAMPLE, FLOAT16/BFLOAT16, FILTER, SCORE_FIELD, WITHSCORES/SCORER, ADDSCORES, SORTABLE UNF, NOHL | Not available | Available ‹VS:00-RELEASENOTES "New Features"› | same |
+
+Other gated 1.3.0 fixes (division by zero, `^`/`&&` precedence, MIN/MAX numeric, SUM/AVG of empty group → `nan`, apostrophe phrases, stemming/fuzzy by code point) are listed in ‹VS:COMPATIBILITY.md:188-204›. Code that must run on both levels should not depend on either branch of a gated item.
 
 ## Import Pattern
 
@@ -48,6 +75,18 @@ from glide_shared.commands.server_modules.ft_options.ft_search_options import (
 # ft.FtCreateOptions  # NO — not public API; import FtCreateOptions directly
 ```
 
+**valkey-search 1.3 names** (exported from both `glide` and `glide_sync` `__all__` ‹glide-async/python/glide/__init__.py:389,458-486; glide-sync/glide_sync/__init__.py:327,401-429›):
+
+```python
+from glide import (  # or glide_sync
+    LoadField, FtWithCursor,                                  # aggregate LOAD … AS, WITHCURSOR
+    FtHybridSearchArm, FtHybridVsimArm, FtHybridVsimFilter,   # ft.hybrid arms
+    FtHybridOptions, FtHybridCombine, FtHybridRrf, FtHybridLinear, FtHybridFunction,
+    HybridFilterPolicy,
+    InfoScope, ShardScope, ConsistencyMode, OrderBy,
+)
+```
+
 ## Distance Metrics Mapping
 
 ```python
@@ -72,6 +111,7 @@ TextField(
     withsuffixtrie: bool = False,
     nosuffixtrie: bool = False,
     sortable: bool = False,
+    unf: bool = False,         # search ≥ 1.3; requires sortable=True (ValueError otherwise)
 )
 ```
 
@@ -83,6 +123,7 @@ TagField(
     separator: Optional[TEncodable] = None,
     case_sensitive: bool = False,
     sortable: bool = False,
+    unf: bool = False,         # search ≥ 1.3; requires sortable=True
 )
 ```
 
@@ -92,8 +133,13 @@ NumericField(
     name: TEncodable,
     alias: Optional[TEncodable] = None,
     sortable: bool = False,
+    unf: bool = False,         # search ≥ 1.3; requires sortable=True
 )
 ```
+
+Signatures ‹G:ft_create_options.py:171,232,278›; `unf` without `sortable` raises `ValueError` ‹G:ft_create_options.py:201,257,298›.
+
+**`unf=True` is a no-op on valkey-search 1.3.** It is accepted, stored and reported by FT.INFO (`UNF` = `1`), but TEXT/TAG sort keys are still compared byte-for-byte (`"Banana"` sorts before `"apple"`) ‹GT:3235›. Include it only for RediSearch call-shape compatibility; never rely on it to change sort order.
 
 ### The `sortable` Parameter
 
@@ -191,6 +237,44 @@ client.ft.create("idx", schema)
 ft.create(client, "idx", schema)
 ```
 
+**FtCreateOptions — full signature** ‹G:ft_create_options.py:502›:
+```python
+FtCreateOptions(
+    data_type=None, prefixes=None, score=None, language=None, skipinitialscan=False,
+    minstemsize=None, withoffsets=False, nooffsets=False, nostopwords=False, stopwords=None,
+    punctuation=None,
+    filter=None,          # search ≥ 1.3: ingestion-time boolean expression
+    score_field=None,     # search ≥ 1.3: per-document score field (boosts ranking)
+    no_highlight=False,   # search ≥ 1.3: NOHL — accepted, a no-op (not even stored)
+)
+```
+Mutually exclusive pairs raise `ValueError`: `withoffsets`/`nooffsets`, `nostopwords`/`stopwords`; `filter=""` also raises ‹G:ft_create_options.py:579-583›.
+
+**search ≥ 1.3 — FILTER: index only matching keys** ‹GT:3194›
+```python
+ft.create(client, "people_idx", [NumericField("age")],
+          FtCreateOptions(data_type=DataType.HASH, prefixes=["person:"], filter="@age > 18"))
+# person:minor {age: 10} matches the prefix but is NOT indexed
+```
+
+**search ≥ 1.3 — SCORE_FIELD: per-document boost** ‹GT:3546›
+```python
+ft.create(client, "docs_idx", [TextField("title")],
+          FtCreateOptions(data_type=DataType.HASH, prefixes=["doc:"], score_field="boost"))
+# doc with boost=100.0 ranks above an otherwise identical doc with boost=1.0
+```
+
+**search ≥ 1.3 — FLOAT16 / BFLOAT16 vectors** (2 bytes per element ‹G:ft_create_options.py:81,91›). GLIDE never encodes vectors for you, for any type — pack the bytes yourself ‹GT:3123›:
+```python
+import struct
+
+VectorFieldAttributesFlat(dimensions=2, distance_metric=DistanceMetricType.L2,
+                          type=VectorType.FLOAT16)
+fp16  = b"".join(struct.pack("<e", v) for v in values)          # FLOAT16
+bf16  = b"".join(struct.pack("<f", v)[2:4] for v in values)     # BFLOAT16 (truncating; server rounds ties-to-even)
+# Store and query with the SAME encoding as the declared type
+```
+
 ### ft.search()
 
 **Searches an index using a query.**
@@ -207,7 +291,7 @@ ft.search(
 **Parameters:**
 - `client`: GlideClient instance (first parameter, always required)
 - `index_name`: Name of the index to search
-- `query`: Search query string (e.g., "*", "hello", "*=>[KNN 5 @vec $query]")
+- `query`: Search query string (e.g., "hello", "@price:[0 100]", "*" on search ≥ 1.3, "*=>[KNN 5 @vec $query]")
 - `options`: FtSearchOptions with params, return fields, etc.
 
 **Return Format:**
@@ -221,6 +305,7 @@ ft.search(
 from glide_sync import ft, GlideClient
 
 # Simple search - NOTE: ft.search(client, ...) NOT client.ft_search(...)
+# query="*" needs search ≥ 1.3; on 1.2 use "@price:[-inf +inf]" (see "Match-all query" below)
 results = ft.search(
     client=client,
     index_name="products_idx",
@@ -335,8 +420,78 @@ from glide_shared.commands.server_modules.ft_options.ft_search_options import (
 )
 
 options = FtSearchOptions(limit=FtSearchLimit(offset=0, count=10))
-results = ft.search(client=client, index_name="idx", query="*", options=options)
+results = ft.search(client=client, index_name="idx", query="*", options=options)  # "*" needs search ≥ 1.3
 ```
+
+An offset past the end returns a bare `[total_count]` (one element, no dict) — guard `len(results) > 1` before reading `results[1]` ‹GT:3053›. `FtSearchOptions(count=True)` sends `LIMIT 0 0` (count only) and is mutually exclusive with `limit` (`ValueError`) ‹G:ft_search_options.py:150-158›.
+
+**Match-all query is version-dependent** (applies to FT.SEARCH and FT.AGGREGATE alike — they share the query parser)
+
+```python
+# search ≥ 1.3 — bare "*" is match-all (#960) ‹GT:2397›
+ft.search(client, "idx", "*")
+
+# search < 1.3 — bare non-vector "*" raises RequestError: Invalid query string syntax
+# ‹VS:src/query/search.cc:2447-2450 — the is_match_all exemption is what #960 (f1db9ed) added›.
+# Use a range on an indexed NUMERIC field (works on every version):
+ft.search(client, "idx", "@price:[-inf +inf]")
+
+# KNN queries "*=>[KNN k @vec $blob]" were never affected — the "*" there is a pre-filter, not a bare query.
+```
+
+**search ≥ 1.3 — `in_keys` (INKEYS): restrict to given keys** ‹G:ft_search_options.py:173-178,254-258; GT:2432›
+
+`None` (default), `[]` and a list are three different requests:
+
+| `in_keys=` | Wire | Result |
+|---|---|---|
+| `None` | no INKEYS | no restriction |
+| `[]` | `INKEYS 0` | **zero results**, always |
+| `["k1", b"k2"]` | `INKEYS 2 k1 k2` | only those keys (post-filter; count reflects the filtered set) |
+
+```python
+# Wrong — "if caller passed nothing, send []" turns "no filter" into "match nothing"
+FtSearchOptions(in_keys=allowed_keys or [])
+
+# Correct — pass None to mean "no restriction"
+FtSearchOptions(in_keys=allowed_keys if allowed_keys else None)
+```
+
+**search ≥ 1.3 — relevance scores** ‹GT:3379,3441›
+
+`with_scores=True` changes each document value from a field dict to `[score, field_dict]`; with `withsortkeys=True` as well it is `[score, sort_key, field_dict]`. `scorer="BM25STD"` is the only scorer; `"TFIDF"` is rejected ‹GT:4604›.
+
+```python
+res = ft.search(client, "idx", "hello", FtSearchOptions(with_scores=True, scorer="BM25STD"))
+for key, (score, fields) in res[1].items():
+    print(key, float(score), fields)
+```
+
+### Vector Range Queries (search ≥ 1.3)
+
+`@field:[VECTOR_RANGE <radius> $blob]` returns every document within `radius`, in both `ft.search` and `ft.aggregate`. Combine with AND (space), OR (`|`) and negation (`-`); name the distance with `=>{$yield_distance_as: <name>}` ‹GT:2645,2774›.
+
+```python
+q = array.array("f", [0.0, 0.0]).tobytes()
+
+ft.search(client, "idx", "@vec:[VECTOR_RANGE 2 $blob]",
+          FtSearchOptions(params={"blob": q}, nocontent=True))
+
+ft.search(client, "idx", "@vec:[VECTOR_RANGE $r $blob]=>{$yield_distance_as: dist}",
+          FtSearchOptions(params={"blob": q, "r": "0.5"}, return_fields=[ReturnField("dist")]))
+
+ft.search(client, "idx", "@vec:[VECTOR_RANGE 2 $blob] @category:{a}",
+          FtSearchOptions(params={"blob": q}, nocontent=True))
+
+ft.aggregate(client, "idx", "@vec:[VECTOR_RANGE 3 $blob]=>{$yield_distance_as: dist}",
+             FtAggregateOptions(loadFields=["dist"], params={"blob": q},
+                                clauses=[FtAggregateSortBy([FtAggregateSortProperty("@dist", OrderBy.ASC)])]))
+```
+
+Server limits on 1.3 ‹VS:src/query/search.cc:2492-2504›:
+- **No VECTOR_RANGE inside a KNN pre-filter**: `"@vec:[VECTOR_RANGE 5 $b]=>[KNN 1 @vec $b]"` → `RequestError` (`…not supported in the filter of a KNN query`) ‹GT:2645›. Run the range query, or the KNN, not one inside the other.
+- **At most one VECTOR_RANGE per query.**
+- For a range query, the distance appears in results only when named via `$yield_distance_as` (and listed in RETURN, if RETURN is used) ‹VS:docs/commands/ft.search.md:64,72›.
 
 ### ft.dropindex()
 
@@ -376,8 +531,15 @@ indexes = ft.list(client)
 **Gets information about an index.**
 
 ```python
-ft.info(client: GlideClient, index_name: str) -> FtInfoResponse
+ft.info(
+    client: GlideClient,
+    index_name: str,
+    scope: Optional[InfoScope] = None,              # LOCAL | PRIMARY | CLUSTER
+    shard_scope: Optional[ShardScope] = None,       # ALLSHARDS | SOMESHARDS
+    consistency: Optional[ConsistencyMode] = None,  # CONSISTENT | INCONSISTENT
+) -> FtInfoResponse
 ```
+‹GA:305; G:ft_search_options.py:19-44›
 
 **Example:**
 ```python
@@ -386,6 +548,8 @@ from glide_sync import ft
 # NOTE: ft.info(client, ...) NOT client.ft_info(...)
 info = ft.info(client, "products_idx")
 ```
+
+**Reply shape depends on emulate-release.** The `index_definition` block gains `score_field` and a real `default_score` only at `search.emulate-release ≥ 1.3.0`; below that it is 6 elements with `default_score == b"1"` and no `score_field`, even if the index was created with `score_field=` ‹GA:326-329; VS:COMPATIBILITY.md:190; GT:3299›. Look fields up by name, never by position, and treat `score_field` as optional. The FT.INFO format also differs from RediSearch's in general ‹VS:COMPATIBILITY.md:133›.
 
 ### ft.aggregate()
 
@@ -406,20 +570,19 @@ ft.aggregate(
 - `query`: Search query string — **NOT the same as FT.SEARCH**. See wildcard warning below.
 - `options`: FtAggregateOptions with LOAD, GROUPBY, REDUCE, SORTBY, etc.
 
-**FT.AGGREGATE rejects wildcard `*` query**
-
-Unlike FT.SEARCH, FT.AGGREGATE does not accept `*` as a match-all query. It raises `RequestError: Invalid query string syntax`.
+**Match-all query for FT.AGGREGATE is version-dependent**
 
 ```python
-# Wrong — raises RequestError
+# search ≥ 1.3 — bare "*" is match-all ‹GT:2500, GT:4026›
 ft.aggregate(client, "idx", "*", options)
 
-# Correct — use a field filter as match-all
+# search < 1.3 — bare "*" raises RequestError: Invalid query string syntax.
+# Use a field filter as match-all:
 ft.aggregate(client, "idx", "@price:[0 inf]", options)  # numeric range
 ft.aggregate(client, "idx", "@category:{*}", options)    # tag wildcard (if applicable)
 ```
 
-Use a numeric range `[0 inf]` on any indexed NUMERIC field, or a TAG filter. There is no universal match-all for FT.AGGREGATE.
+On search < 1.3 there is no universal match-all for FT.AGGREGATE: use a numeric range `[0 inf]` on any indexed NUMERIC field, or a TAG filter. If the server version is unknown, the numeric-range form works on both.
 
 **Return Format:**
 ```python
@@ -432,14 +595,14 @@ Use a numeric range `[0 inf]` on any indexed NUMERIC field, or a TAG filter. The
 ]
 ```
 
-**LOAD is required for reducer fields**
+**LOAD for reducer fields is version-dependent**
 
-FT.AGGREGATE does not automatically load document fields for REDUCE operations.
-Fields used in SUM, AVG, MIN, MAX, etc. must be explicitly loaded with `loadFields`
-before the GROUPBY stage. Without LOAD, reducers silently return 0.
-COUNT is the only exception — it counts rows, not field values.
+- **search < 1.3**: FT.AGGREGATE does not load document fields for REDUCE/SORTBY/APPLY/FILTER. Fields used in SUM, AVG, MIN, MAX, etc. must be explicitly loaded with `loadFields` before the GROUPBY stage. Without LOAD, reducers silently return 0. COUNT is the only exception — it counts rows, not field values.
+- **search ≥ 1.3** (#1341, not gated by emulate-release): any declared attribute referenced by GROUPBY, REDUCE, SORTBY, APPLY or FILTER is loaded automatically. **Vector fields are never auto-loaded.** ‹VS:src/commands/ft_aggregate.cc:50-93; GT:2500 (TOLIST/RANDOM_SAMPLE without loadFields)›
 
-**Wrong — SUM returns 0 because `price` is not loaded:**
+An explicit `loadFields` is correct on both versions, so keep it when the server version is unknown or 1.2 must be supported.
+
+**search < 1.3 — Wrong: SUM returns 0 because `price` is not loaded** (on ≥ 1.3 this same code works):
 ```python
 results = ft.aggregate(
     client=client,
@@ -454,10 +617,10 @@ results = ft.aggregate(
         ]
     ),
 )
-# Every row has total = '0'!
+# Every row has total = '0' on search < 1.3!
 ```
 
-**Correct — LOAD the field first:**
+**Correct on every version — LOAD the field first:**
 ```python
 from glide_sync import ft
 from glide_shared.commands.server_modules.ft_options.ft_aggregate_options import (
@@ -471,7 +634,7 @@ results = ft.aggregate(
     index_name="products_idx",
     query="@price:[0 500]",
     options=FtAggregateOptions(
-        loadFields=["@price"],  # ← Required for SUM/AVG/MIN/MAX
+        loadFields=["@price"],  # ← Required for SUM/AVG/MIN/MAX on search < 1.3; harmless on ≥ 1.3
         clauses=[
             FtAggregateGroupBy(
                 ["@category"],
@@ -499,67 +662,178 @@ rows = raw[1:]        # Off by one — you're skipping the first result
 
 **Correct — GLIDE format:**
 ```python
-raw = ft.aggregate(client, "idx", "*", options)
+raw = ft.aggregate(client, "idx", "*", options)  # "*" needs search ≥ 1.3
 rows = raw            # Flat list of dicts
 total = len(raw)      # Count them yourself
 ```
 
-### ft.profile()
+With `with_cursor=` set, the reply is instead `[rows, cursor_id]` — see [Cursors](#cursors-ftcursor_read--ftcursor_del-search--13).
 
-**Profiles a search query.**
+**FtAggregateOptions — full signature** ‹G:ft_aggregate_options.py:499›:
+```python
+FtAggregateOptions(
+    loadAll=False, loadFields=None,      # camelCase here (FtHybridOptions uses load_all/load_fields)
+    timeout=None, params=None, clauses=None,
+    verbatim=False, inorder=False, slop=None, dialect=None,
+    add_scores=False, scorer=None,       # search ≥ 1.3: ADDSCORES exposes @__score
+    with_cursor=None,                    # search ≥ 1.3: FtWithCursor(count=, maxidle=)
+)
+```
+`loadFields` entries are `str`/`bytes` or `LoadField` ‹G:ft_aggregate_options.py:377›.
+
+#### LOAD … AS — `LoadField` (search ≥ 1.3 **and** emulate-release ≥ 1.3.0)
 
 ```python
-ft.profile(
-    client: GlideClient,
-    index_name: str,
-    query: str,
-    options: FtProfileOptions
-) -> FtProfileResponse
+FtAggregateOptions(loadFields=["title", LoadField("price", alias="cost")])
+# emulate-release ≥ 1.3.0: rows have b"title" and b"cost"; b"price" is absent
+# emulate-release < 1.3.0 (the 1.3 default!) or search 1.2:
+#   RequestError: Index: field `AS` does not exist
 ```
+‹G:ft_aggregate_options.py:331-348; GT:2280›. GLIDE does not check this client-side. If the deployment's emulate-release is unknown, load the plain field and rename it in your own code (or with `FtAggregateApply("@price", "cost")`).
 
-## Alias Management
+#### Reducers
 
-### ft.aliasadd()
+Only three reducers have factories; every other reducer uses the generic constructor `FtAggregateReducer(function, args, name=None)` ‹G:ft_aggregate_options.py:96-224; G:ft_constants.py:121-128›:
+
+| Reducer | Construct | search |
+|---|---|---|
+| COUNT | `FtAggregateReducer("COUNT", [], "n")` | all |
+| COUNT_DISTINCT / SUM / MIN / MAX / AVG / STDDEV | `FtAggregateReducer("SUM", ["@price"], "total")` | all |
+| TOLIST (unique values) | `FtAggregateReducer.to_list("@price", name="prices")` | ≥ 1.3 |
+| FIRST_VALUE | `FtAggregateReducer.first_value("@title", by="@price", order=OrderBy.DESC, name="top")` | ≥ 1.3 |
+| RANDOM_SAMPLE (≤ 1000) | `FtAggregateReducer.random_sample("@price", 10, name="sample")` | ≥ 1.3 |
+
 ```python
-ft.aliasadd(client: GlideClient, alias: str, index_name: str) -> str
+# Wrong — these factories do not exist
+FtAggregateReducer.count()      # AttributeError
+FtAggregateReducer.sum("@price")
+
+# Wrong — order without by
+FtAggregateReducer.first_value("@title", order=OrderBy.DESC)   # ValueError ‹G:ft_aggregate_options.py:191›
 ```
 
-### ft.aliasdel()
+TOLIST and RANDOM_SAMPLE return a **list** value in the row (`row[b"prices"]` is `List[bytes]`); TOLIST order is the engine's scan order, not insertion order ‹GT:2500›. Always pass `name=`: the default column name for an unnamed reducer changes with emulate-release (see the [matrix](#server-version-matrix-valkey-search-12-vs-13)).
+
+#### SORTBY and LIMIT
+
+`FtAggregateSortBy` keeps at most `max` rows (default 10). On emulate-release ≥ 1.3.0 an **adjacent** `FtAggregateLimit` (immediately before or after) raises that to offset+count; below 1.3.0, or with any stage between them, it does not ‹G:ft_aggregate_options.py:30-42; GT:2912›:
+
 ```python
-ft.aliasdel(client: GlideClient, alias: str) -> str
+sort = FtAggregateSortBy([FtAggregateSortProperty("@n", OrderBy.ASC)])
+
+clauses=[sort]                                   # 10 rows (default MAX)
+clauses=[sort, FtAggregateLimit(0, 15)]          # 15 at emulate ≥ 1.3.0; 10 below
+clauses=[sort, FtAggregateGroupBy(["@n"], []), FtAggregateLimit(0, 15)]  # 10 on both
+
+# Portable: set max explicitly to the page end you need
+FtAggregateSortBy([FtAggregateSortProperty("@n", OrderBy.ASC)], max=15)
 ```
 
-### ft.aliasupdate()
+#### Scores in FT.AGGREGATE (search ≥ 1.3)
+
 ```python
-ft.aliasupdate(client: GlideClient, alias: str, index_name: str) -> str
+ft.aggregate(client, "idx", "hello", FtAggregateOptions(
+    add_scores=True, loadFields=["title"],
+    clauses=[FtAggregateSortBy([FtAggregateSortProperty("@__score", OrderBy.DESC)])]))
+# each row has b"__score"
 ```
+‹GT:3496›
 
-### ft.aliaslist()
+### Cursors: ft.cursor_read / ft.cursor_del (search ≥ 1.3)
+
 ```python
-ft.aliaslist(client: GlideClient) -> Mapping[bytes, bytes]
+ft.cursor_read(client, index_name, cursor_id: int, count: Optional[int] = None) -> [rows, cursor_id]
+ft.cursor_del(client, index_name, cursor_id: int) -> "OK"
 ```
+‹GA:527,578›
 
-## Query Explanation
-
-### ft.explain()
 ```python
-ft.explain(
-    client: GlideClient,
-    index_name: str,
-    query: str,
-    options: Optional[FtExplainOptions] = None
-) -> bytes
+rows, cursor_id = ft.aggregate(client, "idx", "*",
+    FtAggregateOptions(loadFields=["n"], with_cursor=FtWithCursor(count=5)))
+while cursor_id != 0:
+    page, cursor_id = ft.cursor_read(client, "idx", cursor_id)
+    rows.extend(page)
+```
+‹GT:4026›
+
+Rules:
+- `with_cursor` changes the reply to `[rows, cursor_id]`; `cursor_id == 0` means exhausted and **no cursor was created** — don't read or delete it ‹VS:docs/commands/ft.aggregate.md:61; GA:542-543›.
+- **A cursor lives only on the node that ran the query** ‹VS:docs/commands/ft.cursor.md:12›. GLIDE routes every WITHCURSOR query and every FT.CURSOR READ/DEL to the **primary of the index's slot, regardless of `ReadFrom`**, so a `PREFER_REPLICA` / AZ-affinity client still pages correctly ‹glide-core/redis-rs/redis/src/cluster_routing.rs:858-919 @ b7c92e92b; GA:554-555,727-733; GT:3821›. Don't try to read a cursor through a replica-routed `custom_command`, and expect a primary failover to lose open cursors ‹GA:733-734›.
+- Reading a deleted, exhausted or expired cursor raises `RequestError` (`Cursor not found…`) ‹GT:4095›. Cursors expire after `maxidle` ms unread (default 300000).
+- FT.HYBRID cursors are read the same way ‹GA:556-558; GT:4503›. `FtSearchOptions` has no `with_cursor` — use `limit=` for FT.SEARCH paging.
+
+### ft.hybrid() (search ≥ 1.3)
+
+**Fuses a text/tag/numeric query (SEARCH arm) with a vector KNN (VSIM arm) into one ranking.** Unlike a filtered KNN in FT.SEARCH, both arms contribute to the score ‹VS:docs/commands/ft.hybrid.md:1-7›.
+
+```python
+ft.hybrid(
+    client, index_name,
+    search_arm: FtHybridSearchArm,
+    vsim_arm: FtHybridVsimArm,
+    options: Optional[FtHybridOptions] = None,
+) -> FtAggregateResponse        # List[dict]; [rows, cursor_id] when with_cursor is set
+```
+‹GA:695›
+
+| Class | Signature |
+|---|---|
+| `FtHybridSearchArm` | `(query, scorer=None, yield_score_as=None)` ‹G:ft_hybrid_options.py:116› |
+| `FtHybridVsimArm` | `(field, vector, k=None, ef_runtime=None, shard_k_ratio=None, yield_score_as=None, filter=None)` ‹G:ft_hybrid_options.py:180› |
+| `FtHybridVsimFilter` | `(expression, policy=None, batch_size=None)`; `policy` = `HybridFilterPolicy.ADHOC` \| `.BATCHES` ‹G:ft_hybrid_options.py:20-52› |
+| `FtHybridCombine.RRF` / `.Linear` / `.Function` | aliases of `FtHybridRrf(constant, window, yield_score_as)`, `FtHybridLinear(alpha, beta, window, yield_score_as)`, `FtHybridFunction(expr, window, yield_score_as)` ‹G:ft_hybrid_options.py:345,395,458,497-499› |
+| `FtHybridOptions` | `(combine=None, load_all=False, load_fields=None, clauses=None, with_cursor=None, local_only=False, timeout=None, params=None, dialect=None)` — **snake_case** `load_*` ‹G:ft_hybrid_options.py:510› |
+
+```python
+import struct
+from glide_sync import ft, FtHybridSearchArm, FtHybridVsimArm, FtHybridVsimFilter, \
+    FtHybridOptions, FtHybridCombine, HybridFilterPolicy, FtAggregateFilter, FtWithCursor
+
+q = struct.pack("2f", 1.0, 1.0)
+
+# Basic: default COMBINE is RRF; rows carry b"__key" and b"__score" ‹GT:4187›
+rows = ft.hybrid(client, "idx", FtHybridSearchArm("hello"), FtHybridVsimArm("vec", q, k=5))
+
+# Per-arm scores, LINEAR fusion, post-fusion FILTER clause ‹GT:4219,4277›
+rows = ft.hybrid(client, "idx",
+    FtHybridSearchArm("hello", yield_score_as="ss"),
+    FtHybridVsimArm("vec", q, k=5, yield_score_as="vs"),
+    FtHybridOptions(combine=FtHybridCombine.Linear(alpha=0.3, beta=0.7),
+                    clauses=[FtAggregateFilter("@ss > 0")]))
+
+# Restrict the vector arm with a filter + execution policy ‹GT:4413›
+FtHybridVsimArm("vec", q, k=5, filter=FtHybridVsimFilter("@title:hello", policy=HybridFilterPolicy.BATCHES))
 ```
 
-### ft.explaincli()
-```python
-ft.explaincli(
-    client: GlideClient,
-    index_name: str,
-    query: str,
-    options: Optional[FtExplainOptions] = None
-) -> bytes
-```
+Rules:
+- **Vector as bytes vs `$name`**: pass raw `bytes` and GLIDE generates the PARAMS entry; pass a **`str`** starting with `$` to reference your own `params` entry. `bytes` are **never** a `$` reference, even if the packed vector happens to start with `0x24` ‹G:ft_hybrid_options.py:244-261; GT:4345›.
+  ```python
+  FtHybridVsimArm("vec", q, k=1)                                         # bytes → auto PARAMS
+  FtHybridVsimArm("vec", "$myvec", k=1), FtHybridOptions(params={"myvec": q})  # str reference
+  FtHybridVsimArm("vec", b"$myvec")   # Wrong — sent as a 6-byte raw vector, not a reference
+  ```
+- A `$name` inside either arm's **query text** is not substituted by the server; only the VSIM vector uses PARAMS ‹VS:docs/commands/ft.hybrid.md:46›.
+- **Argument order on the wire** is LOCALONLY → LOAD → TIMEOUT → PARAMS → clauses → WITHCURSOR → DIALECT. `FtHybridOptions.to_args` emits it that way for you; a hand-built `custom_command` that puts an aggregate FILTER right after the VSIM arm is parsed as a VSIM pre-filter and fails ‹G:ft_hybrid_options.py:626-655›.
+- **At most 10 rows** come back unless you add an `FtAggregateLimit` clause ‹VS:docs/commands/ft.hybrid.md:59›. `k` defaults to 10 ‹VS:docs/commands/ft.hybrid.md:40; GT:4642›.
+- A `LOAD` (`load_fields`/`load_all`) **replaces** the implicit `__key`/`__score` columns — add `"@__key"` and `combine=...(yield_score_as="score")` if you need them ‹VS:docs/commands/ft.hybrid.md:55›. `LoadField(..., alias=)` needs emulate-release ≥ 1.3.0, as in FT.AGGREGATE ‹VS:docs/commands/ft.hybrid.md:45›.
+- Client-side `ValueError`s: `FtHybridLinear` with only one of alpha/beta; negative RRF `constant`; `batch_size` without `policy=BATCHES`; `ef_runtime` with `policy=ADHOC` ‹G:ft_hybrid_options.py:78,231,367,419›.
+- Not supported by the server: VSIM `RANGE` (no typed API; raw command errors), `NOCONTENT`, and FT.HYBRID inside MULTI/EXEC (`Batch(is_atomic=True)`) or Lua ‹VS:docs/commands/ft.hybrid.md:137-141; GT:2837,4701›.
+- Cursor paging works as for FT.AGGREGATE: `FtHybridOptions(with_cursor=FtWithCursor(count=...))`, then `ft.cursor_read` ‹GT:4503›.
+
+## Commands the Server Does Not Implement
+
+valkey-search 1.3.0 registers only FT.CREATE, FT.DROPINDEX, FT.INFO, FT._LIST, FT.SEARCH, FT.AGGREGATE, FT.HYBRID, FT.CURSOR (plus internal/debug commands) ‹VS:src/commands/commands.h:44-53›. These GLIDE functions exist for RediSearch parity but **every call raises `RequestError` (unknown command)** on valkey-search ≤ 1.3 ‹GA:228,255,283,414,443,619,677›:
+
+| Function | Signature (it exists, but the server rejects it) |
+|---|---|
+| `ft.aliasadd` / `ft.aliasupdate` | `(client, alias, index_name) -> TOK` |
+| `ft.aliasdel` | `(client, alias) -> TOK` |
+| `ft.aliaslist` | `(client) -> Mapping` |
+| `ft.explain` | `(client, index_name, query) -> TEncodable` |
+| `ft.explaincli` | `(client, index_name, query) -> List[TEncodable]` |
+| `ft.profile` | `(client, index_name, options: FtProfileOptions) -> FtProfileResponse` — `FtProfileOptions.from_query_options(query, FtSearchOptions(...) \| FtAggregateOptions(...))` |
+
+Don't generate code that relies on aliases (e.g. blue/green index swaps via `aliasupdate`), query explanation or profiling against Valkey. Swap indexes in the application instead (e.g. keep the active index name in a key).
 
 ## Required Imports
 
@@ -641,8 +915,18 @@ FtCreateOptions(...)       # YES - Imported directly, not from ft module
 5. **Positional args**: Use keyword arguments for clarity
 6. **Inferring from Redis-py**: This is NOT Redis-py - do not use Redis-py patterns
 7. **Wrong pagination args**: `FtSearchOptions(first_result=0, limit=10)` does not work - use `FtSearchOptions(limit=FtSearchLimit(offset=0, count=10))`
-8. **Missing LOAD in FT.AGGREGATE**: SUM/AVG/MIN/MAX return 0 without `loadFields` - add `loadFields=["@field"]` to `FtAggregateOptions`
-9. **Wrong FT.AGGREGATE response format**: GLIDE returns `List[dict]` (flat), not `[count, row1, ...]` like valkey-py
+8. **Missing LOAD in FT.AGGREGATE (search < 1.3)**: SUM/AVG/MIN/MAX return 0 without `loadFields` - add `loadFields=["@field"]`. On ≥ 1.3 referenced fields auto-load; explicit LOAD is still portable
+9. **Wrong FT.AGGREGATE response format**: GLIDE returns `List[dict]` (flat), not `[count, row1, ...]` like valkey-py; with `with_cursor` it is `[rows, cursor_id]`
+10. **Bare `*` on search < 1.3**: raises `Invalid query string syntax` in FT.SEARCH and FT.AGGREGATE - use `@num:[-inf +inf]`; on ≥ 1.3 `*` is fine
+11. **`LoadField(alias=)` at default emulate-release**: errors (``field `AS` does not exist``) unless `search.emulate-release ≥ 1.3.0`
+12. **`in_keys=[]` meaning "no filter"**: `[]` returns zero results; use `None` for no restriction
+13. **Bytes vector as a `$` reference**: in `FtHybridVsimArm`, only a `str` starting with `$` is a reference; `bytes` are always the raw vector
+14. **VECTOR_RANGE inside a KNN pre-filter**: rejected on 1.3; so is a second VECTOR_RANGE in one query
+15. **Reading a cursor via a replica**: cursors are node-local; let `ft.cursor_read` route it (primary of the index slot) and stop at `cursor_id == 0`
+16. **Calling alias/explain/profile**: the functions exist but valkey-search ≤ 1.3 rejects the commands
+17. **Inventing reducer factories**: only `to_list`, `first_value`, `random_sample` exist; COUNT/SUM/AVG… use `FtAggregateReducer("SUM", ["@f"], "name")`
+18. **`loadAll`/`loadFields` vs `load_all`/`load_fields`**: camelCase on `FtAggregateOptions`, snake_case on `FtHybridOptions`
+19. **Relying on `unf=True` or `no_highlight=True` to change results**: both are accepted no-ops on 1.3
 
 ## See Also
 

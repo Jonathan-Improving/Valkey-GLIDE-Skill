@@ -5,12 +5,14 @@ description: Production-ready patterns for Valkey GLIDE clients across 6 languag
 
 Based on valkey-glide v2.4.0. Detect target version from package manifest before generating code - if the project uses a newer version than v2.4.0, stop and tell the operator this skill needs updating.
 
+Python FT (search) guidance also covers valkey-search 1.3, whose Python API ships in valkey-glide **`<TBD: first release containing valkey-glide#7335>`** (merged as `b7c92e92b`). On v2.4.0 itself, the 1.3-only names (`ft.hybrid`, `ft.cursor_read`, `LoadField`, `FtWithCursor`, `in_keys=`, reducer factories, …) do not exist — use only the rules marked for search < 1.3.
+
 ## Language Routing
 
 | User task | Open |
 |-----------|------|
 | Python async/sync, ft.* module functions, batch, vector search, decode bytes | `references/python.md` |
-| Python FT module API signatures, ft.create/search/aggregate/dropindex | `references/python-ft-api.md` |
+| Python FT module API signatures, ft.create/search/aggregate/hybrid/cursor_read, valkey-search 1.2 vs 1.3 / emulate-release rules | `references/python-ft-api.md` |
 | Python anti-patterns (client.ft_search, redis-py patterns, sequential awaits) | `references/python-anti-patterns.md` |
 | Java CompletableFuture, FT static methods, GlideString, batch, Spring | `references/java.md` |
 | Java anti-patterns (bare Exception catch, unchecked futures, client methods for FT) | `references/java-anti-patterns.md` |
