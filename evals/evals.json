@@ -247,6 +247,246 @@
         }
       ],
       "files": []
+    },
+    {
+      "id": 15,
+      "name": "vs13-load-as-default-emulate",
+      "prompt": "We just upgraded to valkey-search 1.3.0 (stock config, nothing changed). In valkey-glide Python (async) I want an FT.AGGREGATE that loads the `price` field but returns it under the name `cost`. Show me the code and tell me anything I need to watch out for.",
+      "expected_output": "Uses LoadField('price', alias='cost') in FtAggregateOptions(loadFields=...) and states that LOAD ... AS only works with search.emulate-release >= 1.3.0, whose default is 1.0.0, so on a stock server it errors (field `AS` does not exist); offers CONFIG SET or client-side rename.",
+      "assertions": [
+        {
+          "id": "uses-loadfield",
+          "text": "Uses LoadField(... alias=...)",
+          "type": "positive_match",
+          "pattern": "LoadField\\(\\s*[\\\"']@?price[\\\"']\\s*,\\s*alias\\s*="
+        },
+        {
+          "id": "mentions-emulate-release",
+          "text": "Mentions search.emulate-release",
+          "type": "positive_match",
+          "pattern": "emulate[-_]release"
+        },
+        {
+          "id": "default-is-1-0",
+          "text": "States the default emulate-release is 1.0.0 / stock server keeps old behaviour",
+          "type": "positive_match",
+          "pattern": "1\\.0\\.0"
+        }
+      ],
+      "files": []
+    },
+    {
+      "id": 16,
+      "name": "vs13-in-keys-none-vs-empty",
+      "prompt": "Using valkey-glide Python sync against valkey-search 1.3, write `search_titles(client, query: str, only_keys: list[str] | None = None)` that runs FT.SEARCH on index 'docs' and, when only_keys is given, restricts results to those keys. When the caller passes nothing (or an empty list) there should be NO restriction.",
+      "expected_output": "Uses FtSearchOptions(in_keys=...), passing None (not []) when only_keys is None or empty, and explains that in_keys=[] sends INKEYS 0 and returns zero results.",
+      "assertions": [
+        {
+          "id": "uses-in-keys",
+          "text": "Uses FtSearchOptions(in_keys=...)",
+          "type": "positive_match",
+          "pattern": "in_keys\\s*="
+        },
+        {
+          "id": "no-empty-list-default",
+          "text": "Does not default in_keys to an empty list (e.g. `or []`)",
+          "type": "negative_match",
+          "pattern": "in_keys\\s*=\\s*(only_keys\\s+or\\s+\\[\\]|\\[\\])"
+        },
+        {
+          "id": "explains-empty-means-none",
+          "text": "Explains that an empty list/INKEYS 0 returns zero results",
+          "type": "positive_match",
+          "pattern": "(?i)(INKEYS 0|zero results|no results|match(es)? nothing|excludes? every)"
+        }
+      ],
+      "files": []
+    },
+    {
+      "id": 17,
+      "name": "vs13-hybrid-bytes-vector",
+      "prompt": "With valkey-glide Python (async) and valkey-search 1.3, write a hybrid search over index 'products' that combines the text query 'running shoes' with a KNN (k=20) over the vector field 'embedding' using a list[float] query embedding, fusing both rankings. Return the top 20 keys.",
+      "expected_output": "Uses ft.hybrid(client, 'products', FtHybridSearchArm(...), FtHybridVsimArm('embedding', <packed bytes>, k=20), FtHybridOptions(...)), packs the embedding to bytes, does not pass bytes as a '$' reference, and adds an FtAggregateLimit (or explains the default 10-row cap) to get 20 rows.",
+      "assertions": [
+        {
+          "id": "uses-ft-hybrid",
+          "text": "Calls ft.hybrid(",
+          "type": "positive_match",
+          "pattern": "\\bft\\.hybrid\\("
+        },
+        {
+          "id": "uses-vsim-arm",
+          "text": "Uses FtHybridVsimArm",
+          "type": "positive_match",
+          "pattern": "FtHybridVsimArm\\("
+        },
+        {
+          "id": "uses-search-arm",
+          "text": "Uses FtHybridSearchArm",
+          "type": "positive_match",
+          "pattern": "FtHybridSearchArm\\("
+        },
+        {
+          "id": "packs-bytes",
+          "text": "Packs the embedding to bytes (struct/array/numpy)",
+          "type": "positive_match",
+          "pattern": "(struct\\.pack|array\\.array|tobytes\\(\\)|np\\.float32|astype)"
+        },
+        {
+          "id": "handles-10-row-cap",
+          "text": "Adds a LIMIT or mentions the default 10-row cap",
+          "type": "positive_match",
+          "pattern": "(?i)(FtAggregateLimit\\(|at most 10|default.{0,20}10|10 rows|LIMIT 0 20)"
+        },
+        {
+          "id": "no-raw-ft-hybrid-command",
+          "text": "Does not hand-build FT.HYBRID via custom_command",
+          "type": "negative_match",
+          "pattern": "custom_command\\(\\s*\\[\\s*[\\\"']FT\\.HYBRID"
+        }
+      ],
+      "files": []
+    },
+    {
+      "id": 18,
+      "name": "vs13-cursor-prefer-replica",
+      "prompt": "Our valkey-glide Python cluster client is configured with ReadFrom.PREFER_REPLICA. I need to page through ~50k FT.AGGREGATE rows on valkey-search 1.3 using a cursor. Will cursor reads land on replicas and break? Show the paging loop.",
+      "expected_output": "Uses FtAggregateOptions(with_cursor=FtWithCursor(count=...)) and ft.cursor_read in a loop until cursor_id == 0; explains cursors are node-local and GLIDE routes WITHCURSOR and FT.CURSOR to the primary of the index slot regardless of ReadFrom, so PREFER_REPLICA is fine.",
+      "assertions": [
+        {
+          "id": "uses-ftwithcursor",
+          "text": "Uses FtWithCursor",
+          "type": "positive_match",
+          "pattern": "FtWithCursor\\("
+        },
+        {
+          "id": "uses-cursor-read",
+          "text": "Calls ft.cursor_read",
+          "type": "positive_match",
+          "pattern": "\\bft\\.cursor_read\\("
+        },
+        {
+          "id": "loops-until-zero",
+          "text": "Loops until cursor id is 0",
+          "type": "positive_match",
+          "pattern": "(!=\\s*0|while\\s+\\w*cursor\\w*\\s*:|==\\s*0)"
+        },
+        {
+          "id": "primary-routing",
+          "text": "States GLIDE routes cursor commands to the primary regardless of ReadFrom",
+          "type": "positive_match",
+          "pattern": "(?i)primary"
+        }
+      ],
+      "files": []
+    },
+    {
+      "id": 19,
+      "name": "vs13-portable-match-all-aggregate",
+      "prompt": "Our staging runs valkey-search 1.2 and production runs 1.3. Using valkey-glide Python sync, write one FT.AGGREGATE call over index 'products' (fields: category TAG, price NUMERIC) that matches ALL documents and returns SUM(price) per category, and works on both environments.",
+      "expected_output": "Does not use a bare '*' query (1.2 rejects it); uses a numeric range like '@price:[-inf +inf]' or '[0 inf]'; keeps explicit loadFields=['@price'] (1.2 needs it; 1.3 auto-loads); GROUPBY @category with REDUCE SUM.",
+      "assertions": [
+        {
+          "id": "numeric-range-match-all",
+          "text": "Uses a numeric-range match-all on price",
+          "type": "positive_match",
+          "pattern": "@price:\\[\\s*(-inf|0)\\s+\\+?inf\\s*\\]"
+        },
+        {
+          "id": "explicit-load-price",
+          "text": "Explicitly loads @price",
+          "type": "positive_match",
+          "pattern": "loadFields\\s*=\\s*\\[[^\\]]*[\\\"']@?price[\\\"']"
+        },
+        {
+          "id": "sum-reducer",
+          "text": "Uses SUM reducer",
+          "type": "positive_match",
+          "pattern": "FtAggregateReducer\\(\\s*[\\\"']SUM[\\\"']"
+        },
+        {
+          "id": "no-bare-star-call",
+          "text": "Does not call ft.aggregate with a bare '*' query",
+          "type": "negative_match",
+          "pattern": "ft\\.aggregate\\([^)]*?,\\s*(query\\s*=\\s*)?[\\\"']\\*[\\\"']"
+        }
+      ],
+      "files": []
+    },
+    {
+      "id": 20,
+      "name": "vs13-vector-range-in-knn",
+      "prompt": "Review this valkey-glide Python code for valkey-search 1.3. It should return the 5 nearest neighbours that are also within distance 0.5:\n```python\nres = ft.search(client, 'idx', '@vec:[VECTOR_RANGE 0.5 $b]=>[KNN 5 @vec $b]', FtSearchOptions(params={'b': q}))\n```",
+      "expected_output": "Flags that a VECTOR_RANGE predicate inside a KNN pre-filter is rejected by valkey-search 1.3 (RequestError); suggests running VECTOR_RANGE alone (with $yield_distance_as and sorting/limiting) or KNN alone and filtering by distance client-side.",
+      "assertions": [
+        {
+          "id": "flags-rejection",
+          "text": "States the VECTOR_RANGE-in-KNN-prefilter form is rejected/not supported",
+          "type": "positive_match",
+          "pattern": "(?i)(not supported|rejected|RequestError|is an error|will fail|fails)"
+        },
+        {
+          "id": "offers-alternative",
+          "text": "Offers a VECTOR_RANGE-only or KNN-only alternative",
+          "type": "positive_match",
+          "pattern": "(?i)(yield_distance_as|\\*=>\\[KNN)"
+        }
+      ],
+      "files": []
+    },
+    {
+      "id": 21,
+      "name": "vs13-alias-unsupported",
+      "prompt": "I'm building zero-downtime reindexing for a Valkey (valkey-search 1.3) product catalog with valkey-glide Python. Plan: build products_v2, then ft.aliasupdate(client, 'products', 'products_v2') so queries against 'products' switch over. Write that swap function.",
+      "expected_output": "Says FT.ALIASADD/ALIASUPDATE are not implemented by valkey-search (the GLIDE functions exist but raise RequestError), and proposes an application-level pointer (e.g. a key storing the active index name).",
+      "assertions": [
+        {
+          "id": "says-unsupported",
+          "text": "States aliases are not supported/implemented by valkey-search",
+          "type": "positive_match",
+          "pattern": "(?i)(not (supported|implemented)|unknown command|does not implement|doesn't implement|isn't supported|unsupported)"
+        },
+        {
+          "id": "app-level-pointer",
+          "text": "Proposes storing the active index name (e.g. in a key)",
+          "type": "positive_match",
+          "pattern": "(?i)(active[_ ]index|current[_ ]index|pointer|client\\.set\\()"
+        }
+      ],
+      "files": []
+    },
+    {
+      "id": 22,
+      "name": "vs13-reducer-factories",
+      "prompt": "valkey-glide Python async, valkey-search 1.3: FT.AGGREGATE over 'orders' grouped by @customer, returning the number of orders, the list of distinct @sku values, and the @sku of the most expensive order (by @amount). Show the code.",
+      "expected_output": "Uses FtAggregateReducer('COUNT', [], name) (generic), FtAggregateReducer.to_list('@sku', name=...), and FtAggregateReducer.first_value('@sku', by='@amount', order=OrderBy.DESC, name=...); does not invent factories like FtAggregateReducer.count().",
+      "assertions": [
+        {
+          "id": "uses-to-list",
+          "text": "Uses FtAggregateReducer.to_list",
+          "type": "positive_match",
+          "pattern": "FtAggregateReducer\\.to_list\\("
+        },
+        {
+          "id": "uses-first-value-by",
+          "text": "Uses FtAggregateReducer.first_value with by=",
+          "type": "positive_match",
+          "pattern": "FtAggregateReducer\\.first_value\\([^)]*by\\s*="
+        },
+        {
+          "id": "generic-count",
+          "text": "Uses generic FtAggregateReducer('COUNT', ...)",
+          "type": "positive_match",
+          "pattern": "FtAggregateReducer\\(\\s*[\\\"']COUNT[\\\"']"
+        },
+        {
+          "id": "no-invented-factory",
+          "text": "Does not invent .count()/.sum() factories",
+          "type": "negative_match",
+          "pattern": "FtAggregateReducer\\.(count|sum|avg|min|max|count_distinct)\\("
+        }
+      ],
+      "files": []
     }
   ]
 }
