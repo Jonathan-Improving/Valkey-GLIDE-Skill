@@ -289,9 +289,9 @@
         },
         {
           "id": "no-empty-list-default",
-          "text": "Does not default in_keys to an empty list (e.g. `or []`)",
+          "text": "Code (not comments) does not default in_keys to an empty list (e.g. `or []`)",
           "type": "negative_match",
-          "pattern": "in_keys\\s*=\\s*(only_keys\\s+or\\s+\\[\\]|\\[\\])"
+          "pattern": "(?m)^(?!\\s*#).*\\bin_keys\\s*=\\s*(only_keys\\s+or\\s+\\[\\]|\\[\\])"
         },
         {
           "id": "explains-empty-means-none",
