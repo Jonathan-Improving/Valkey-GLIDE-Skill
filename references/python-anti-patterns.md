@@ -184,7 +184,7 @@ while cid != 0:
     rows.extend(page)
 ```
 
-**Why:** A cursor exists only on the node that ran the query ‹VS:docs/commands/ft.cursor.md:12›. In **cluster mode** GLIDE routes WITHCURSOR queries and FT.CURSOR to the primary of the index's slot regardless of `ReadFrom` ‹GA:554-555; glide-core/redis-rs/redis/src/cluster_routing.rs:920-936; GT:3821›. A **standalone** `GlideClient` with `PREFER_REPLICA`/AZ affinity is not pinned: FT.AGGREGATE may open the cursor on a replica while FT.CURSOR goes to the primary — page with a `ReadFrom.PRIMARY` client ‹glide-core/src/client/standalone_client.rs:864-873,1023›.
+**Why:** A cursor exists only on the node that ran the query ‹VS:docs/commands/ft.cursor.md:12›. In **cluster mode** GLIDE routes WITHCURSOR queries and FT.CURSOR to the primary of the index's slot regardless of `ReadFrom` ‹GA:554-555; glide-core/redis-rs/redis/src/cluster_routing.rs:920-936 @ b7c92e92b; GT:3821›. A **standalone** `GlideClient` with `PREFER_REPLICA`/AZ affinity is not pinned: FT.AGGREGATE may open the cursor on a replica while FT.CURSOR goes to the primary — page with a `ReadFrom.PRIMARY` client ‹glide-core/src/client/standalone_client.rs:864-873,1023 @ b7c92e92b›.
 
 ### INCORRECT: `in_keys=[]` to mean "no restriction"
 ```python
