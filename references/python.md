@@ -10,6 +10,7 @@ Use when writing or reviewing Python code that uses valkey-glide (async via `gli
 2. **NO CLIENT METHODS**: `client.ft_search()`, `client.ft_create()`, `client.ft()` DO NOT EXIST in GLIDE.
 3. **ONLY SOURCE OF TRUTH**: `python-ft-api.md` is the ONLY documentation for vector search. Do not infer usage from any other source.
 4. **MODULE-LEVEL FUNCTIONS ONLY**: All FT functions are `ft.function(client, ...)` NOT `client.ft_function(...)`
+5. **SERVER VERSION DECIDES SEVERAL RULES**: bare `*`, auto-LOAD, `LOAD … AS`, SORTBY/LIMIT and FT.INFO shapes differ between valkey-search 1.2, 1.3 and 1.3 with `search.emulate-release ≥ 1.3.0`. Check the [version matrix](python-ft-api.md#server-version-matrix-valkey-search-12-vs-13) before choosing a pattern.
 
 ---
 
@@ -414,8 +415,14 @@ if TYPE_CHECKING:
 | Expecting ping() to Return Bool | Assuming `client.ping()` returns `True` for success | `ping()` returns `b'PONG'` (bytes), not a boolean. Check with `== b'PONG'` |
 | Using Integer Cursor with scan() | Passing integer cursor to `scan()`: `cursor = 0` | `scan()` requires bytes cursor: `cursor = b"0"` and returns bytes |
 | Wrong FtSearch Pagination | `FtSearchOptions(first_result=0, limit=10)` — TypeError | Use `FtSearchOptions(limit=FtSearchLimit(offset=0, count=10))` — see `python-ft-api.md` |
-| Missing LOAD in FT.AGGREGATE | SUM/AVG/MIN/MAX return 0 | Add `loadFields=["@field"]` to `FtAggregateOptions` — see `python-ft-api.md` |
-| Wrong FT.AGGREGATE Response Format | Assuming `raw[0]` is count like valkey-py | GLIDE returns flat `List[dict]`, no leading count — see `python-ft-api.md` |
+| Missing LOAD in FT.AGGREGATE (search < 1.3) | SUM/AVG/MIN/MAX return 0 | Add `loadFields=["@field"]` to `FtAggregateOptions` (auto-loaded on ≥ 1.3; explicit LOAD is portable) — see `python-ft-api.md` |
+| Wrong FT.AGGREGATE Response Format | Assuming `raw[0]` is count like valkey-py | GLIDE returns flat `List[dict]`, no leading count; `[rows, cursor_id]` with `with_cursor` — see `python-ft-api.md` |
+| Bare `*` on search < 1.3 | `RequestError: Invalid query string syntax` | Use `@num:[-inf +inf]`; `*` is match-all only on ≥ 1.3 |
+| `LoadField(alias=)` at default emulate-release | ``Index: field `AS` does not exist`` | Needs `search.emulate-release ≥ 1.3.0` (default is 1.0.0); otherwise load plain and rename in code |
+| `in_keys=[]` as "no filter" | Zero results | `None` = no restriction; `[]` = match nothing |
+| Calling `ft.aliasadd`/`explain`/`profile` | `RequestError` unknown command | valkey-search ≤ 1.3 does not implement them |
+| Cursor paging on a standalone `GlideClient` with `PREFER_REPLICA`/AZ affinity | `Cursor not found` (FT.AGGREGATE may run on a replica, FT.CURSOR goes to the primary) | Page with a `ReadFrom.PRIMARY` client; cluster clients pin cursor traffic to the slot primary automatically |
+| FT.HYBRID raw bytes passed as `"$..."` | Vector misread or param missing | `bytes` = raw vector (auto PARAMS); only a `str` `"$name"` references `params` |
 
 ---
 
