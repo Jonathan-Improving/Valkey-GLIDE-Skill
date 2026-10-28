@@ -421,6 +421,7 @@ if TYPE_CHECKING:
 | `LoadField(alias=)` at default emulate-release | ``Index: field `AS` does not exist`` | Needs `search.emulate-release ≥ 1.3.0` (default is 1.0.0); otherwise load plain and rename in code |
 | `in_keys=[]` as "no filter" | Zero results | `None` = no restriction; `[]` = match nothing |
 | Calling `ft.aliasadd`/`explain`/`profile` | `RequestError` unknown command | valkey-search ≤ 1.3 does not implement them |
+| Cursor paging on a standalone `GlideClient` with `PREFER_REPLICA`/AZ affinity | `Cursor not found` (FT.AGGREGATE may run on a replica, FT.CURSOR goes to the primary) | Page with a `ReadFrom.PRIMARY` client; cluster clients pin cursor traffic to the slot primary automatically |
 | FT.HYBRID raw bytes passed as `"$..."` | Vector misread or param missing | `bytes` = raw vector (auto PARAMS); only a `str` `"$name"` references `params` |
 
 ---

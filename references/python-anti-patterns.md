@@ -158,7 +158,7 @@ rows = [{b"cost": r[b"price"], **{k: v for k, v in r.items() if k != b"price"}} 
 ### INCORRECT: Passing a bytes vector as a `$` reference in FT.HYBRID
 ```python
 FtHybridVsimArm("vec", b"$q", k=5), FtHybridOptions(params={"q": q_bytes})
-# b"$q" is sent as a 3-byte raw vector, not a reference to params["q"]
+# b"$q" is sent as a 2-byte raw vector, not a reference to params["q"]
 ```
 
 ### Correct: bytes inline, or a `str` reference plus your own params entry
@@ -184,7 +184,7 @@ while cid != 0:
     rows.extend(page)
 ```
 
-**Why:** A cursor exists only on the node that ran the query ‹VS:docs/commands/ft.cursor.md:12›. GLIDE routes WITHCURSOR queries and FT.CURSOR to the primary of the index's slot regardless of `ReadFrom` ‹GA:554-555; GT:3821›.
+**Why:** A cursor exists only on the node that ran the query ‹VS:docs/commands/ft.cursor.md:12›. In **cluster mode** GLIDE routes WITHCURSOR queries and FT.CURSOR to the primary of the index's slot regardless of `ReadFrom` ‹GA:554-555; glide-core/redis-rs/redis/src/cluster_routing.rs:920-936; GT:3821›. A **standalone** `GlideClient` with `PREFER_REPLICA`/AZ affinity is not pinned: FT.AGGREGATE may open the cursor on a replica while FT.CURSOR goes to the primary — page with a `ReadFrom.PRIMARY` client ‹glide-core/src/client/standalone_client.rs:864-873,1023›.
 
 ### INCORRECT: `in_keys=[]` to mean "no restriction"
 ```python
@@ -222,7 +222,7 @@ client.set("products:active_index", "products_v2")
 active = client.get("products:active_index").decode()
 ft.search(client, active, "@price:[0 100]")
 ```
-‹VS:src/commands/commands.h:44-53; GA:283›
+‹VS:src/module_loader.cc:45-120; GA:283›
 
 ---
 

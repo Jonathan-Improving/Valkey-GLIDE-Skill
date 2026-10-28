@@ -21,7 +21,7 @@ Use when writing or reviewing Python code that calls ft.create, ft.search, ft.ag
 
 ## Server Version Matrix (valkey-search 1.2 vs 1.3)
 
-Two things decide behaviour: the **module version** (1.2 or 1.3) and, on 1.3, the **`search.emulate-release`** config. Compatibility fixes that change a reply or a parse are gated on `search.emulate-release >= 1.3.0`; the default is the current major `.0.0`, i.e. **`1.0.0` for all of 1.x**, so a stock 1.3 server keeps the 1.2 behaviour for every gated item ‹VS:src/valkey_search_options.cc:876,896-901; VS:COMPATIBILITY.md:172›. Opt in with `CONFIG SET search.emulate-release 1.3.0` ‹VS:integration/compatibility_test.py:984›.
+Two things decide behaviour: the **module version** (1.2 or 1.3) and, on 1.3, the **`search.emulate-release`** config. Compatibility fixes that change a reply or a parse are gated on `search.emulate-release >= 1.3.0`; the default is the current major `.0.0`, i.e. **`1.0.0` for all of 1.x**, so a stock 1.3 server keeps the 1.2 behaviour for every gated item ‹VS:src/valkey_search_options.cc:876,896-901; VS:COMPATIBILITY.md:172›. Opt in with `CONFIG SET search.emulate-release 1.3.0` (accepted because it is ≤ the module version ‹VS:src/valkey_search_options.cc:887-894; VS:src/version.h:23›; the same CONFIG SET mechanism is used e.g. in ‹VS:integration/compatibility_test.py:984›).
 
 | Topic | search < 1.3 | search ≥ 1.3, default emulate-release (1.0.0) | search ≥ 1.3, emulate-release ≥ 1.3.0 |
 |---|---|---|---|
@@ -75,7 +75,7 @@ from glide_shared.commands.server_modules.ft_options.ft_search_options import (
 # ft.FtCreateOptions  # NO — not public API; import FtCreateOptions directly
 ```
 
-**valkey-search 1.3 names** (exported from both `glide` and `glide_sync` `__all__` ‹glide-async/python/glide/__init__.py:389,458-486; glide-sync/glide_sync/__init__.py:327,401-429›):
+**valkey-search 1.3 names** (exported from both `glide` and `glide_sync` `__all__` ‹python/glide-async/python/glide/__init__.py:389,458-486; python/glide-sync/glide_sync/__init__.py:327,401-429›):
 
 ```python
 from glide import (  # or glide_sync
@@ -271,9 +271,10 @@ import struct
 VectorFieldAttributesFlat(dimensions=2, distance_metric=DistanceMetricType.L2,
                           type=VectorType.FLOAT16)
 fp16  = b"".join(struct.pack("<e", v) for v in values)          # FLOAT16
-bf16  = b"".join(struct.pack("<f", v)[2:4] for v in values)     # BFLOAT16 (truncating; server rounds ties-to-even)
+bf16  = b"".join(struct.pack("<f", v)[2:4] for v in values)     # BFLOAT16 (truncating; for HASH the server stores these bytes as-is)
 # Store and query with the SAME encoding as the declared type
 ```
+The server converts and rounds (ties-to-even) only when it parses floats itself, i.e. JSON arrays ‹VS:src/indexes/vector_type.cc:172-175; VS:src/indexes/bfloat16.h:20›. **BFLOAT16 needs a SIMD BF16 path on the server CPU**; elsewhere FT.CREATE fails with a FailedPrecondition error ‹VS:src/index_schema.cc:175-191; VS:src/indexes/vector_base.cc:660-684›. Prefer FLOAT16 when the fleet's CPUs are unknown.
 
 ### ft.search()
 
@@ -758,9 +759,12 @@ while cursor_id != 0:
 
 Rules:
 - `with_cursor` changes the reply to `[rows, cursor_id]`; `cursor_id == 0` means exhausted and **no cursor was created** — don't read or delete it ‹VS:docs/commands/ft.aggregate.md:61; GA:542-543›.
-- **A cursor lives only on the node that ran the query** ‹VS:docs/commands/ft.cursor.md:12›. GLIDE routes every WITHCURSOR query and every FT.CURSOR READ/DEL to the **primary of the index's slot, regardless of `ReadFrom`**, so a `PREFER_REPLICA` / AZ-affinity client still pages correctly ‹glide-core/redis-rs/redis/src/cluster_routing.rs:858-919 @ b7c92e92b; GA:554-555,727-733; GT:3821›. Don't try to read a cursor through a replica-routed `custom_command`, and expect a primary failover to lose open cursors ‹GA:733-734›.
+- **A cursor lives only on the node that ran the query** ‹VS:docs/commands/ft.cursor.md:12›.
+  - **Cluster client (`GlideClusterClient`)**: GLIDE routes FT.AGGREGATE … WITHCURSOR, FT.HYBRID and every FT.CURSOR READ/DEL to the **primary of the index's slot, regardless of `ReadFrom`**, so a `PREFER_REPLICA` / AZ-affinity cluster client still pages correctly ‹glide-core/redis-rs/redis/src/cluster_routing.rs:858-936 @ b7c92e92b; GA:554-555,727-733; GT:3821,4503›.
+  - **Standalone client (`GlideClient`) with replicas: NOT pinned.** FT.AGGREGATE is a read-only command, so with `PREFER_REPLICA`/AZ affinity it can open the cursor on a replica, while FT.CURSOR (not read-only) goes to the primary → `Cursor not found` ‹glide-core/src/client/standalone_client.rs:864-873,1023; glide-core/redis-rs/redis/src/cluster_routing.rs:1152 @ b7c92e92b›. Use a `ReadFrom.PRIMARY` client for cursor paging in standalone mode. (Traced in source; no live standalone+replica test exists.)
+  - Don't read a cursor through a hand-routed `custom_command`, and expect a primary failover to lose open cursors ‹GA:733-734›.
 - Reading a deleted, exhausted or expired cursor raises `RequestError` (`Cursor not found…`) ‹GT:4095›. Cursors expire after `maxidle` ms unread (default 300000).
-- FT.HYBRID cursors are read the same way ‹GA:556-558; GT:4503›. `FtSearchOptions` has no `with_cursor` — use `limit=` for FT.SEARCH paging.
+- FT.HYBRID cursors are read the same way ‹GA:556-558; GT:4503›. `FtSearchOptions` has no `with_cursor` — use `limit=` for FT.SEARCH paging. The server accepts FT.SEARCH WITHCURSOR, but a raw `custom_command` sending it is **not** primary-pinned by GLIDE ‹glide-core/redis-rs/redis/src/cluster_routing.rs:901-903 @ b7c92e92b›.
 
 ### ft.hybrid() (search ≥ 1.3)
 
@@ -814,15 +818,15 @@ Rules:
   ```
 - A `$name` inside either arm's **query text** is not substituted by the server; only the VSIM vector uses PARAMS ‹VS:docs/commands/ft.hybrid.md:46›.
 - **Argument order on the wire** is LOCALONLY → LOAD → TIMEOUT → PARAMS → clauses → WITHCURSOR → DIALECT. `FtHybridOptions.to_args` emits it that way for you; a hand-built `custom_command` that puts an aggregate FILTER right after the VSIM arm is parsed as a VSIM pre-filter and fails ‹G:ft_hybrid_options.py:626-655›.
-- **At most 10 rows** come back unless you add an `FtAggregateLimit` clause ‹VS:docs/commands/ft.hybrid.md:59›. `k` defaults to 10 ‹VS:docs/commands/ft.hybrid.md:40; GT:4642›.
-- A `LOAD` (`load_fields`/`load_all`) **replaces** the implicit `__key`/`__score` columns — add `"@__key"` and `combine=...(yield_score_as="score")` if you need them ‹VS:docs/commands/ft.hybrid.md:55›. `LoadField(..., alias=)` needs emulate-release ≥ 1.3.0, as in FT.AGGREGATE ‹VS:docs/commands/ft.hybrid.md:45›.
+- **At most 10 rows** come back unless you add an `FtAggregateLimit` clause ‹VS:docs/commands/ft.hybrid.md:59; VS:src/commands/ft_hybrid_parser.cc:116,1063-1079›. `k` defaults to 10 ‹VS:docs/commands/ft.hybrid.md:40; VS:src/commands/ft_hybrid_parser.cc:55,372›.
+- A `LOAD` (`load_fields`/`load_all`) **replaces** the implicit `__key`/`__score` columns — add `"@__key"` and `combine=...(yield_score_as="score")` if you need them ‹VS:docs/commands/ft.hybrid.md:55; VS:src/commands/ft_hybrid_parser.cc:995,1040-1045›. `LoadField(..., alias=)` needs emulate-release ≥ 1.3.0, as in FT.AGGREGATE ‹VS:docs/commands/ft.hybrid.md:45›.
 - Client-side `ValueError`s: `FtHybridLinear` with only one of alpha/beta; negative RRF `constant`; `batch_size` without `policy=BATCHES`; `ef_runtime` with `policy=ADHOC` ‹G:ft_hybrid_options.py:78,231,367,419›.
 - Not supported by the server: VSIM `RANGE` (no typed API; raw command errors), `NOCONTENT`, and FT.HYBRID inside MULTI/EXEC (`Batch(is_atomic=True)`) or Lua ‹VS:docs/commands/ft.hybrid.md:137-141; GT:2837,4701›.
 - Cursor paging works as for FT.AGGREGATE: `FtHybridOptions(with_cursor=FtWithCursor(count=...))`, then `ft.cursor_read` ‹GT:4503›.
 
 ## Commands the Server Does Not Implement
 
-valkey-search 1.3.0 registers only FT.CREATE, FT.DROPINDEX, FT.INFO, FT._LIST, FT.SEARCH, FT.AGGREGATE, FT.HYBRID, FT.CURSOR (plus internal/debug commands) ‹VS:src/commands/commands.h:44-53›. These GLIDE functions exist for RediSearch parity but **every call raises `RequestError` (unknown command)** on valkey-search ≤ 1.3 ‹GA:228,255,283,414,443,619,677›:
+valkey-search 1.3.0 registers only FT.CREATE, FT.DROPINDEX, FT.INFO, FT._LIST, FT.SEARCH, FT.AGGREGATE, FT.HYBRID, FT.CURSOR (plus FT._DEBUG and FT.INTERNAL_UPDATE) ‹VS:src/module_loader.cc:45-120›. valkey-search 1.2 has none of the alias/explain/profile commands either. These GLIDE functions exist for RediSearch parity but **every call raises `RequestError` (unknown command)** on valkey-search ≤ 1.3 ‹GA:228,255,283,414,443,619,677›:
 
 | Function | Signature (it exists, but the server rejects it) |
 |---|---|
@@ -922,7 +926,7 @@ FtCreateOptions(...)       # YES - Imported directly, not from ft module
 12. **`in_keys=[]` meaning "no filter"**: `[]` returns zero results; use `None` for no restriction
 13. **Bytes vector as a `$` reference**: in `FtHybridVsimArm`, only a `str` starting with `$` is a reference; `bytes` are always the raw vector
 14. **VECTOR_RANGE inside a KNN pre-filter**: rejected on 1.3; so is a second VECTOR_RANGE in one query
-15. **Reading a cursor via a replica**: cursors are node-local; let `ft.cursor_read` route it (primary of the index slot) and stop at `cursor_id == 0`
+15. **Reading a cursor via a replica**: cursors are node-local. A cluster client pins cursor traffic to the slot primary for you; a **standalone** client with `PREFER_REPLICA`/AZ affinity does not — page with a `ReadFrom.PRIMARY` client. Stop at `cursor_id == 0`
 16. **Calling alias/explain/profile**: the functions exist but valkey-search ≤ 1.3 rejects the commands
 17. **Inventing reducer factories**: only `to_list`, `first_value`, `random_sample` exist; COUNT/SUM/AVG… use `FtAggregateReducer("SUM", ["@f"], "name")`
 18. **`loadAll`/`loadFields` vs `load_all`/`load_fields`**: camelCase on `FtAggregateOptions`, snake_case on `FtHybridOptions`
